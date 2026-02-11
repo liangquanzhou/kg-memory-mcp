@@ -23,6 +23,11 @@ dev = [
     "pyright>=1.1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/liangquanzhou/kg-memory-mcp"
+Repository = "https://github.com/liangquanzhou/kg-memory-mcp"
+Issues = "https://github.com/liangquanzhou/kg-memory-mcp/issues"
+
 [project.scripts]
 kg-memory-mcp = "kg_memory_mcp.cli:main"
 
@@ -48,6 +53,8 @@ pythonVersion = "3.11"
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.408",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "ruff>=0.15.0",
 ]

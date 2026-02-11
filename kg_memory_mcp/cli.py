@@ -102,8 +102,8 @@ def collect(agent: str | None):
 
 
 async def _collect(agent: str | None):
-    from .collector import claude_code, codex, gemini
     from . import db
+    from .collector import claude_code, codex, gemini
 
     os.makedirs(os.path.expanduser("~/.local/share/kg-memory/attachments"), exist_ok=True)
 
@@ -178,6 +178,19 @@ def hooks_install(agent: str):
         click.echo("OpenCode plugin: not yet implemented. Copy hooks/opencode.ts manually.")
 
 
+def _hook_command_exists(entries: list, keyword: str) -> bool:
+    """Check if a hook command containing keyword exists in Claude Code hook entries."""
+    for entry in entries:
+        # Claude Code format: {"hooks": [{"type": "command", "command": "..."}]}
+        for h in entry.get("hooks", []):
+            if keyword in h.get("command", ""):
+                return True
+        # Also check flat format (legacy)
+        if keyword in entry.get("command", ""):
+            return True
+    return False
+
+
 def _install_claude_code_hook():
     """Install Claude Code SessionEnd hook into ~/.claude/settings.json"""
     settings_path = Path.home() / ".claude" / "settings.json"
@@ -191,17 +204,19 @@ def _install_claude_code_hook():
     hooks_config = settings.setdefault("hooks", {})
     session_end = hooks_config.setdefault("SessionEnd", [])
 
+    if _hook_command_exists(session_end, "kg-memory-mcp"):
+        click.echo("Claude Code hook already installed.")
+        return
+
+    # Claude Code requires: {"hooks": [{"type": "command", ...}]}
     hook_entry = {
-        "type": "command",
-        "command": "kg-memory-mcp hooks run claude-code",
+        "hooks": [
+            {
+                "type": "command",
+                "command": "kg-memory-mcp hooks run claude-code",
+            }
+        ]
     }
-
-    # 检查是否已安装
-    for h in session_end:
-        if "kg-memory-mcp" in h.get("command", ""):
-            click.echo("Claude Code hook already installed.")
-            return
-
     session_end.append(hook_entry)
 
     with open(settings_path, "w") as f:
@@ -243,16 +258,19 @@ def _install_gemini_hook():
     hooks_config = settings.setdefault("hooks", {})
     session_end = hooks_config.setdefault("SessionEnd", [])
 
+    if _hook_command_exists(session_end, "kg-memory-mcp"):
+        click.echo("Gemini hook already installed.")
+        return
+
+    # Gemini CLI uses same hooks format as Claude Code
     hook_entry = {
-        "type": "command",
-        "command": "kg-memory-mcp hooks run gemini",
+        "hooks": [
+            {
+                "type": "command",
+                "command": "kg-memory-mcp hooks run gemini",
+            }
+        ]
     }
-
-    for h in session_end:
-        if "kg-memory-mcp" in h.get("command", ""):
-            click.echo("Gemini hook already installed.")
-            return
-
     session_end.append(hook_entry)
 
     with open(settings_path, "w") as f:
@@ -297,10 +315,9 @@ def hooks_status():
                         data = json.load(f)
                     hooks_data = data.get("hooks", {})
                     for event_hooks in hooks_data.values():
-                        for h in event_hooks:
-                            if "kg-memory-mcp" in h.get("command", ""):
-                                installed = True
-                                break
+                        if _hook_command_exists(event_hooks, "kg-memory-mcp"):
+                            installed = True
+                            break
             except Exception:
                 pass
 

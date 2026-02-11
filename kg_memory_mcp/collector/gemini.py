@@ -1,8 +1,8 @@
 """Gemini CLI 对话解析器"""
 
+import glob as glob_mod
 import json
 import os
-import glob as glob_mod
 from datetime import datetime
 
 from . import import_sessions

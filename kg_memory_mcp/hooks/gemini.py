@@ -118,12 +118,13 @@ async def _archive_conversation(conn: asyncpg.Connection, messages: list[dict], 
         """,
         "gemini-cli", session_id, started_at, ended_at, json.dumps({}),
     )
+    assert row is not None
     db_session_id = row["id"]
 
     existing = await conn.fetchval(
         "SELECT COUNT(*) FROM chat_messages WHERE session_id = $1", db_session_id
     )
-    if existing > 0:
+    if (existing or 0) > 0:
         log.info(f"Session {session_id} already archived")
         return
 
@@ -153,7 +154,7 @@ def _extract_with_gemini(conversation: str, source: str) -> list:
         return []
 
     try:
-        from google import genai
+        from google import genai  # type: ignore[attr-defined]
         client = genai.Client(api_key=GEMINI_API_KEY)
 
         prompt = f"""分析以下 Gemini CLI AI 编程助手的对话记录，提取值得长期记住的信息。
@@ -217,6 +218,7 @@ async def _save_to_kg(conn: asyncpg.Connection, memories: list, source: str):
         """,
         entity_name, emb_str,
     )
+    assert row is not None
     entity_id = row["id"]
 
     saved = 0

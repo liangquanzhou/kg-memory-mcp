@@ -10,7 +10,6 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import asyncpg
@@ -104,12 +103,13 @@ async def _archive_conversation(conn: asyncpg.Connection, messages: list, sessio
         """,
         "claude-code", session_id, cwd, started_at, ended_at, json.dumps({}),
     )
+    assert row is not None
     db_session_id = row["id"]
 
     existing = await conn.fetchval(
         "SELECT COUNT(*) FROM chat_messages WHERE session_id = $1", db_session_id
     )
-    if existing > 0:
+    if (existing or 0) > 0:
         log.info(f"Session {session_id} already archived, skipping messages")
         return
 
@@ -201,7 +201,7 @@ def _extract_with_gemini(conversation: str, cwd: str) -> dict | None:
         return None
 
     try:
-        from google import genai
+        from google import genai  # type: ignore[attr-defined]
 
         client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -260,6 +260,7 @@ async def _save_to_kg(conn: asyncpg.Connection, memories: list, cwd: str):
         """,
         entity_name, f"Auto-extracted from {cwd}", emb_str,
     )
+    assert row is not None
     entity_id = row["id"]
 
     saved = 0

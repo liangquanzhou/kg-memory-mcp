@@ -4,9 +4,8 @@ import json
 
 from mcp.server.fastmcp import FastMCP
 
-from . import db
+from . import chat_db, db
 from . import search as search_mod
-from . import chat_db
 
 mcp = FastMCP("kg-memory", log_level="WARNING")
 

@@ -71,7 +71,12 @@ async def insert_messages(session_id: int, messages: list[dict]) -> int:
     return count
 
 
-async def insert_attachment(message_id: int, file_path: str, file_type: str | None = None, file_size: int | None = None) -> int:
+async def insert_attachment(
+    message_id: int,
+    file_path: str,
+    file_type: str | None = None,
+    file_size: int | None = None,
+) -> int:
     """插入附件记录"""
     pool = await get_pool()
     row = await pool.fetchrow(

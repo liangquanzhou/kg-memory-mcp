@@ -169,11 +169,12 @@ async def _archive_session(conn: asyncpg.Connection, session: dict) -> int:
         session.get("started_at"), session.get("ended_at"),
         json.dumps(session.get("meta", {}), ensure_ascii=False),
     )
+    assert row is not None
     sid = row["id"]
 
-    existing = await conn.fetchval(
+    existing: int = await conn.fetchval(
         "SELECT COUNT(*) FROM chat_messages WHERE session_id = $1", sid
-    )
+    ) or 0
 
     total = len(session["messages"])
     if existing >= total:

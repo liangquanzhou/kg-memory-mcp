@@ -206,7 +206,7 @@ kg-memory-mcp hooks status
 
 ```bash
 # Clone and install dev dependencies
-git clone https://github.com/nicepkg/kg-memory-mcp.git
+git clone https://github.com/liangquanzhou/kg-memory-mcp.git
 cd kg-memory-mcp
 pip install -e ".[dev]"
 

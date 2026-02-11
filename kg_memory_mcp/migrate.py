@@ -5,8 +5,9 @@ import re
 
 import click
 
-from .db import get_pool, close_pool
-from .embedding import get_embedding, close as close_embedding
+from .db import close_pool, get_pool
+from .embedding import close as close_embedding
+from .embedding import get_embedding
 
 
 def parse_jsonl(path: str) -> tuple[list[dict], list[dict]]:
@@ -162,7 +163,7 @@ async def migrate(jsonl_path: str):
     entity_count = await pool.fetchval("SELECT COUNT(*) FROM kg_entities")
     obs_count = await pool.fetchval("SELECT COUNT(*) FROM kg_observations")
     rel_count_db = await pool.fetchval("SELECT COUNT(*) FROM kg_relations")
-    click.echo(f"\nMigration complete:")
+    click.echo("\nMigration complete:")
     click.echo(f"  kg_entities: {entity_count}")
     click.echo(f"  kg_observations: {obs_count}")
     click.echo(f"  kg_relations: {rel_count_db}")

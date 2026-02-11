@@ -38,6 +38,19 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["kg_memory_mcp"]
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "CLAUDE.md",
+    ".github/",
+    "tests/",
+    "docs/",
+    "tmp/",
+    "uv.lock",
+    ".env.example",
+    ".ruff_cache/",
+    ".pytest_cache/",
+]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120

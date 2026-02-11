@@ -225,7 +225,7 @@ async def _save_to_kg(conn: asyncpg.Connection, memories: list, source: str):
     for memory in memories:
         content = f"[Gemini CLI: {source}] {memory}"
 
-        content_hash = hashlib.md5(content.encode()).hexdigest()
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
         exists = await conn.fetchval(
             "SELECT 1 FROM kg_observations WHERE entity_id = $1 AND content_hash = $2",
             entity_id, content_hash,

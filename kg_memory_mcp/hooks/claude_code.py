@@ -266,7 +266,7 @@ async def _save_to_kg(conn: asyncpg.Connection, memories: list, cwd: str):
     saved = 0
     for memory in memories:
         content = f"[{cwd}] {memory}"
-        content_hash = hashlib.md5(content.encode()).hexdigest()
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
 
         exists = await conn.fetchval(
             "SELECT 1 FROM kg_observations WHERE entity_id = $1 AND content_hash = $2",
@@ -301,10 +301,20 @@ async def run():
         cwd = hook_input.get("cwd", "")
         reason = hook_input.get("reason", "")
 
-        log.info(f"SessionEnd triggered: session={session_id}, reason={reason}, cwd={cwd}")
+        log.info(f"SessionEnd triggered: session={session_id[:12]}..., reason={reason}")
 
         if not transcript_path or not Path(transcript_path).exists():
             log.info("No transcript file, skipping")
+            return
+
+        # 路径安全校验：只允许读取 Claude Code 已知目录下的文件
+        resolved = Path(transcript_path).resolve()
+        allowed_prefixes = [
+            Path.home() / ".claude",
+            Path("/tmp"),
+        ]
+        if not any(str(resolved).startswith(str(p)) for p in allowed_prefixes):
+            log.warning(f"Transcript path outside allowed directories: {resolved}")
             return
 
         messages = _read_transcript(transcript_path)

@@ -94,43 +94,37 @@ async def search_chats(query: str, agent: str | None = None, limit: int = 20) ->
     """搜索对话消息 (FTS + ILIKE fallback + ts_rank 排序)"""
     pool = await get_pool()
 
-    idx = 1
-    params: list = []
-
-    # FTS 条件 (plainto_tsquery 自动分词)
-    fts_cond = f"m.search_vector @@ plainto_tsquery('simple', ${idx})"
-    params.append(query)
-    idx += 1
-
-    # ILIKE fallback (FTS 对短词/特殊字符可能不匹配)
-    ilike_cond = f"m.content ILIKE '%' || ${idx} || '%'"
-    params.append(query)
-    idx += 1
-
-    # 组合: FTS OR ILIKE
-    search_cond = f"({fts_cond} OR {ilike_cond})"
-
-    agent_cond = ""
     if agent:
-        agent_cond = f"AND s.agent = ${idx}"
-        params.append(agent)
-        idx += 1
-
-    params.append(limit)
-
-    rows = await pool.fetch(
-        f"""
-        SELECT m.id, m.role, m.content, m.created_at,
-               s.agent, s.native_session_id, s.project_dir,
-               ts_rank(m.search_vector, plainto_tsquery('simple', $1)) AS rank
-        FROM chat_messages m
-        JOIN chat_sessions s ON m.session_id = s.id
-        WHERE {search_cond} {agent_cond}
-        ORDER BY rank DESC, m.created_at DESC
-        LIMIT ${idx}
-        """,
-        *params,
-    )
+        rows = await pool.fetch(
+            """
+            SELECT m.id, m.role, m.content, m.created_at,
+                   s.agent, s.native_session_id, s.project_dir,
+                   ts_rank(m.search_vector, plainto_tsquery('simple', $1)) AS rank
+            FROM chat_messages m
+            JOIN chat_sessions s ON m.session_id = s.id
+            WHERE (m.search_vector @@ plainto_tsquery('simple', $1)
+                   OR m.content ILIKE '%' || $2 || '%')
+              AND s.agent = $3
+            ORDER BY rank DESC, m.created_at DESC
+            LIMIT $4
+            """,
+            query, query, agent, limit,
+        )
+    else:
+        rows = await pool.fetch(
+            """
+            SELECT m.id, m.role, m.content, m.created_at,
+                   s.agent, s.native_session_id, s.project_dir,
+                   ts_rank(m.search_vector, plainto_tsquery('simple', $1)) AS rank
+            FROM chat_messages m
+            JOIN chat_sessions s ON m.session_id = s.id
+            WHERE m.search_vector @@ plainto_tsquery('simple', $1)
+                  OR m.content ILIKE '%' || $2 || '%'
+            ORDER BY rank DESC, m.created_at DESC
+            LIMIT $3
+            """,
+            query, query, limit,
+        )
     return [dict(r) for r in rows]
 
 

@@ -3,6 +3,7 @@
 -- 依赖: pgvector 扩展（已安装）
 
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ============================================================
 -- 知识图谱层 (kg_ 前缀)
@@ -23,7 +24,7 @@ CREATE TABLE IF NOT EXISTS kg_observations (
     id            SERIAL PRIMARY KEY,
     entity_id     INT REFERENCES kg_entities(id) ON DELETE CASCADE,
     content       TEXT NOT NULL,
-    content_hash  TEXT GENERATED ALWAYS AS (md5(content)) STORED,
+    content_hash  TEXT GENERATED ALWAYS AS (encode(digest(content, 'sha256'), 'hex')) STORED,
     embedding     VECTOR(1024),
     search_vector TSVECTOR GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED,
     source_agent  TEXT,

@@ -202,6 +202,16 @@ kg-memory-mcp hooks status
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API base URL |
 | `OLLAMA_EMBED_MODEL` | `bge-m3` | Ollama embedding model name |
 
+## Privacy & Security
+
+**All data stays local by default.** The MCP server, database, and embeddings run entirely on your machine. No data is sent to external services unless you explicitly opt in.
+
+- **Database storage**: Conversation transcripts and knowledge graph data are stored in plaintext in your local PostgreSQL database. Ensure your database has appropriate access controls.
+- **Ollama embeddings**: Vector embeddings are generated locally via Ollama. No data leaves your machine for embedding generation.
+- **Gemini knowledge extraction** (opt-in): If you set the `GEMINI_API_KEY` environment variable, the SessionEnd hooks will send conversation summaries (up to 15KB) to Google's Gemini API for knowledge extraction. This is **disabled by default** -- without the API key, no data is sent externally. If you use this feature, be aware that conversation content (including project paths and code snippets) will be transmitted to Google.
+- **Hook transcript access**: Hooks only read transcript files from expected directories (`~/.claude/`, `~/.codex/`, `~/.gemini/`). Path traversal is validated.
+- **Sensitive content filtering**: The `quality.py` module automatically filters out API keys, passwords, and tokens before writing to the knowledge graph.
+
 ## Development
 
 ```bash

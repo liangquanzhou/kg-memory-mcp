@@ -123,7 +123,7 @@ async def add_observations(entity_name: str, observations: list[str], source_age
 
     for content in safe_observations:
         # content_hash 去重
-        content_hash = hashlib.md5(content.encode()).hexdigest()
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
         if await is_duplicate_hash(pool, entity_id, content_hash):
             continue
 

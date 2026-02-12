@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README_zh.md)
+
 # kg-memory-mcp
 
 **Knowledge graph memory + conversation archival MCP server**
@@ -7,13 +9,13 @@ A self-hosted [Model Context Protocol](https://modelcontextprotocol.io/) server 
 ## Features
 
 - **Knowledge Graph** -- Create entities with typed observations and directional relations. Automatic deduplication (hash + semantic) and sensitive content filtering.
-- **Conversation Archival** -- Collect and store chat transcripts from Claude Code, Codex CLI, and Gemini CLI. Full session history with metadata.
+- **Conversation Archival** -- Collect and store chat transcripts from Claude Code, Codex CLI, Gemini CLI, and OpenCode. Full session history with metadata.
 - **Hybrid Search** -- Full-text search (PostgreSQL tsvector) combined with vector similarity (pgvector HNSW), fused via Reciprocal Rank Fusion (RRF) with 1-hop graph expansion.
 - **Hook System** -- Automatic post-session archival and knowledge extraction. Install hooks for supported agents with a single CLI command.
 - **Local Embeddings** -- Uses Ollama with bge-m3 (1024-dim) for all vector operations. No data leaves your machine.
 - **Schema Migrations** -- Lightweight numbered-SQL migration system. Safely upgrades existing databases without data loss.
 - **Data Export** -- Export to JSONL (human-readable, interoperable) or SQLite (single-file backup). Compatible with migration to other tools.
-- **Image Archival** -- Extracts base64 images from Claude Code transcripts to the local filesystem with metadata tracking.
+- **Image Archival** -- Extracts base64 images from all agent transcripts to the local filesystem with metadata tracking.
 
 ## Architecture
 
@@ -21,7 +23,8 @@ A self-hosted [Model Context Protocol](https://modelcontextprotocol.io/) server 
 +------------------+     stdio      +-------------------+
 |   MCP Client     |<-------------->|  kg-memory-mcp    |
 |  (Claude Code,   |                |  (FastMCP server) |
-|   Codex, Gemini) |                +--------+----------+
+|   Codex, Gemini, |                +--------+----------+
+|   OpenCode)      |                         |
 +------------------+                         |
                                              | asyncpg
                                     +--------v----------+
@@ -155,7 +158,7 @@ Commands:
   init                   Run schema migrations (create/upgrade tables)
   migrate JSONL_PATH     Migrate from memory.jsonl (mcp-server-memory format)
   collect                Collect conversation transcripts from AI agents
-    --agent TEXT          Only collect from: claude-code, codex, gemini-cli
+    --agent TEXT          Only collect from: claude-code, codex, gemini-cli, opencode
   export jsonl           Export all data to JSONL files
     --output-dir PATH    Output directory (default: ./export)
   export sqlite          Export all data to a single SQLite file
@@ -232,7 +235,7 @@ kg-memory-mcp export sqlite --output ./backup.db
 - **Database storage**: Conversation transcripts and knowledge graph data are stored in plaintext in your local PostgreSQL database. Ensure your database has appropriate access controls.
 - **Ollama embeddings**: Vector embeddings are generated locally via Ollama. No data leaves your machine for embedding generation.
 - **Gemini knowledge extraction** (opt-in): If you set the `GEMINI_API_KEY` environment variable, the SessionEnd hooks will send conversation summaries (up to 15KB) to Google's Gemini API for knowledge extraction. This is **disabled by default** -- without the API key, no data is sent externally. Conversation content is automatically filtered to remove lines containing API keys, passwords, and tokens before transmission, but project paths and code snippets may still be included.
-- **Hook transcript access**: Hooks only read transcript files from expected directories (`~/.claude/`, `~/.codex/`, `~/.gemini/`). Path traversal is validated.
+- **Hook transcript access**: Hooks only read transcript files from expected directories (`~/.claude/`, `~/.codex/`, `~/.gemini/`, `~/.local/share/opencode/`). Path traversal is validated.
 - **Sensitive content filtering**: The `quality.py` module filters out API keys, passwords, and tokens when writing to the knowledge graph via MCP tools and hooks. Note: bulk operations like `migrate` and `collect` also apply this filter.
 
 ## Uninstall
@@ -242,6 +245,7 @@ kg-memory-mcp export sqlite --output ./backup.db
 kg-memory-mcp hooks uninstall claude-code
 kg-memory-mcp hooks uninstall codex
 kg-memory-mcp hooks uninstall gemini
+kg-memory-mcp hooks uninstall opencode
 
 # 2. (Optional) Drop all tables from the database
 kg-memory-mcp reset

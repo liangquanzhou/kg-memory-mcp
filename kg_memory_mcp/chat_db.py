@@ -37,10 +37,10 @@ async def upsert_session(
     return row["id"]
 
 
-async def insert_messages(session_id: int, messages: list[dict]) -> int:
-    """批量插入消息，返回插入数量。通过已有消息数实现增量导入。"""
+async def insert_messages(session_id: int, messages: list[dict]) -> list[int]:
+    """批量插入消息，返回插入的 message_id 列表。通过已有消息数实现增量导入。"""
     if not messages:
-        return 0
+        return []
     pool = await get_pool()
 
     # 增量导入：跳过已存在的消息
@@ -49,23 +49,25 @@ async def insert_messages(session_id: int, messages: list[dict]) -> int:
     )
     new_messages = messages[existing:]
     if not new_messages:
-        return 0
+        return []
 
-    count = 0
+    inserted_ids: list[int] = []
     for msg in new_messages:
         content = msg.get("content") or ""
         # KG_CHAT_SANITIZE=true 时过滤含敏感信息的消息
         if _CHAT_SANITIZE and content and contains_sensitive(content):
+            inserted_ids.append(-1)  # placeholder for skipped messages
             continue
-        await pool.execute(
+        row = await pool.fetchrow(
             """
             INSERT INTO chat_messages (session_id, role, content, meta, created_at)
             VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
             """,
             session_id, msg["role"], content,
             json.dumps(msg.get("meta", {}), ensure_ascii=False), msg["created_at"],
         )
-        count += 1
+        inserted_ids.append(row["id"])
 
     # 更新 message_count
     await pool.execute(
@@ -76,7 +78,7 @@ async def insert_messages(session_id: int, messages: list[dict]) -> int:
         """,
         session_id,
     )
-    return count
+    return inserted_ids
 
 
 async def insert_attachment(

@@ -58,6 +58,7 @@ def parse_claude_code_session(filepath: str) -> dict | None:
                 model = msg["model"]
 
             # 解析 content (可能是 string 或 list of parts)
+            attachments = []
             if isinstance(raw_content, list):
                 texts = []
                 tool_count = 0
@@ -68,6 +69,13 @@ def parse_claude_code_session(filepath: str) -> dict | None:
                             texts.append(part.get("text", ""))
                         elif ptype == "tool_use":
                             tool_count += 1
+                        elif ptype == "image":
+                            source = part.get("source", {})
+                            if source.get("type") == "base64" and source.get("data"):
+                                attachments.append({
+                                    "media_type": source.get("media_type", "image/png"),
+                                    "data": source["data"],
+                                })
                     elif isinstance(part, str):
                         texts.append(part)
                 content = "\n".join(texts)
@@ -78,15 +86,23 @@ def parse_claude_code_session(filepath: str) -> dict | None:
             else:
                 content = str(raw_content) if raw_content else ""
 
-            if not content.strip():
+            if not content.strip() and not attachments:
                 continue
 
-            messages.append({
+            if attachments:
+                meta["has_images"] = True
+                meta["image_count"] = len(attachments)
+
+            msg_data: dict = {
                 "role": role,
                 "content": content[:50000],
                 "meta": meta,
                 "created_at": ts,
-            })
+            }
+            if attachments:
+                msg_data["attachments"] = attachments
+
+            messages.append(msg_data)
 
     if not messages:
         return None

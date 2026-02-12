@@ -11,6 +11,9 @@ A self-hosted [Model Context Protocol](https://modelcontextprotocol.io/) server 
 - **Hybrid Search** -- Full-text search (PostgreSQL tsvector) combined with vector similarity (pgvector HNSW), fused via Reciprocal Rank Fusion (RRF) with 1-hop graph expansion.
 - **Hook System** -- Automatic post-session archival and knowledge extraction. Install hooks for supported agents with a single CLI command.
 - **Local Embeddings** -- Uses Ollama with bge-m3 (1024-dim) for all vector operations. No data leaves your machine.
+- **Schema Migrations** -- Lightweight numbered-SQL migration system. Safely upgrades existing databases without data loss.
+- **Data Export** -- Export to JSONL (human-readable, interoperable) or SQLite (single-file backup). Compatible with migration to other tools.
+- **Image Archival** -- Extracts base64 images from Claude Code transcripts to the local filesystem with metadata tracking.
 
 ## Architecture
 
@@ -149,10 +152,14 @@ kg-memory-mcp [OPTIONS] COMMAND [ARGS]
 
 Commands:
   serve                  Start the MCP server (stdio transport)
-  init                   Create tables and indexes (execute schema.sql)
+  init                   Run schema migrations (create/upgrade tables)
   migrate JSONL_PATH     Migrate from memory.jsonl (mcp-server-memory format)
   collect                Collect conversation transcripts from AI agents
     --agent TEXT          Only collect from: claude-code, codex, gemini-cli
+  export jsonl           Export all data to JSONL files
+    --output-dir PATH    Output directory (default: ./export)
+  export sqlite          Export all data to a single SQLite file
+    --output PATH        Output file path (default: ./kg-memory-backup.db)
   reset                  Drop all kg-memory-mcp tables (with confirmation)
   hooks install AGENT    Install hook for a specific agent
   hooks uninstall AGENT  Remove hook for a specific agent
@@ -186,6 +193,12 @@ kg-memory-mcp hooks uninstall claude-code
 
 # Check hook status
 kg-memory-mcp hooks status
+
+# Export data to JSONL (for migration to other tools)
+kg-memory-mcp export jsonl --output-dir ./my-export
+
+# Export data to SQLite (single-file backup)
+kg-memory-mcp export sqlite --output ./backup.db
 ```
 
 ## Supported Agents
@@ -209,6 +222,7 @@ kg-memory-mcp hooks status
 | `KG_CHAT_SANITIZE` | *(disabled)* | Set to `true` to filter messages containing secrets before archival |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API base URL |
 | `OLLAMA_EMBED_MODEL` | `bge-m3` | Ollama embedding model name |
+| `ATTACHMENT_DIR` | `~/.local/share/kg-memory/attachments` | Directory for storing image attachments |
 
 ## Privacy & Security
 

@@ -1,20 +1,8 @@
--- kg-memory-mcp schema
--- 知识图谱 + 对话存档，部署到 knowledge_base 数据库
--- 依赖: pgvector 扩展（已安装）
--- 注意: 生产环境请使用 `kg-memory-mcp init` (迁移器)，而非直接执行此文件
+-- v1: Baseline schema (knowledge graph + conversation archival)
+-- This is the initial schema for kg-memory-mcp v0.1.0
 
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
--- ============================================================
--- Schema 版本追踪
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS schema_version (
-    version     INT PRIMARY KEY,
-    applied     TIMESTAMPTZ DEFAULT NOW(),
-    description TEXT
-);
 
 -- ============================================================
 -- 知识图谱层 (kg_ 前缀)
@@ -105,4 +93,3 @@ CREATE INDEX IF NOT EXISTS idx_chat_sessions_started ON chat_sessions (started_a
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages (session_id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_created ON chat_messages (created_at);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_fts ON chat_messages USING GIN (search_vector);
-

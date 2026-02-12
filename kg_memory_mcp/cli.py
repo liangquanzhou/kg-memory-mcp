@@ -5,7 +5,6 @@ import json
 import os
 import sys
 import tempfile
-from importlib.resources import files
 from pathlib import Path
 
 import click
@@ -82,23 +81,13 @@ def _psql_env(db_password: str) -> dict[str, str]:
 @click.option("--db-port", envvar="KG_DB_PORT", default="5432", help="Database port")
 @click.option("--db-password", envvar="KG_DB_PASSWORD", default="", help="Database password")
 def init(db_name: str, db_user: str, db_host: str, db_port: str, db_password: str):
-    """Create tables and indexes (execute schema.sql)."""
-    import subprocess
+    """Run schema migrations (create/upgrade tables)."""
+    from .migrations.runner import run_migrations
 
-    schema_path = files("kg_memory_mcp").joinpath("schema.sql")
-    psql_bin = _find_psql()
-
-    click.echo(f"Running schema.sql on {db_name}@{db_host}:{db_port} ...")
-    result = subprocess.run(
-        [psql_bin, "-h", db_host, "-p", db_port, "-U", db_user, "-d", db_name, "-f", str(schema_path)],
-        capture_output=True, text=True, env=_psql_env(db_password),
-    )
-
-    if result.returncode != 0:
-        click.echo(f"Error:\n{result.stderr}", err=True)
-        sys.exit(1)
-
-    click.echo("Schema initialized successfully.")
+    click.echo(f"Running migrations on {db_name}@{db_host}:{db_port} ...")
+    dsn = {"dbname": db_name, "user": db_user, "host": db_host, "port": db_port, "password": db_password}
+    version = run_migrations(dsn)
+    click.echo(f"Schema version: v{version}")
 
 
 # ============================================================
@@ -111,6 +100,45 @@ def migrate(jsonl_path: str):
     """Migrate from memory.jsonl (mcp-server-memory format)."""
     from .migrate import migrate as do_migrate
     asyncio.run(do_migrate(jsonl_path))
+
+
+# ============================================================
+# export
+# ============================================================
+
+@main.group()
+def export():
+    """Export data to JSONL or SQLite format."""
+
+
+@export.command("jsonl")
+@click.option("--output-dir", default="./export", help="Output directory for JSONL files")
+def export_jsonl(output_dir: str):
+    """Export all data to JSONL files."""
+    asyncio.run(_export_jsonl(output_dir))
+
+
+async def _export_jsonl(output_dir: str):
+    from .export import export_jsonl as do_export
+    counts = await do_export(output_dir)
+    click.echo(f"\nExported to {output_dir}/")
+    for table, count in counts.items():
+        click.echo(f"  {table}: {count}")
+
+
+@export.command("sqlite")
+@click.option("--output", default="./kg-memory-backup.db", help="Output SQLite file path")
+def export_sqlite(output: str):
+    """Export all data to a single SQLite file."""
+    asyncio.run(_export_sqlite(output))
+
+
+async def _export_sqlite(output: str):
+    from .export import export_sqlite as do_export
+    counts = await do_export(output)
+    click.echo(f"\nExported to {output}")
+    for table, count in counts.items():
+        click.echo(f"  {table}: {count}")
 
 
 # ============================================================
@@ -180,7 +208,8 @@ def reset(db_name: str, db_user: str, db_host: str, db_port: str, db_password: s
         "DROP TABLE IF EXISTS chat_sessions CASCADE; "
         "DROP TABLE IF EXISTS kg_relations CASCADE; "
         "DROP TABLE IF EXISTS kg_observations CASCADE; "
-        "DROP TABLE IF EXISTS kg_entities CASCADE;"
+        "DROP TABLE IF EXISTS kg_entities CASCADE; "
+        "DROP TABLE IF EXISTS schema_version CASCADE;"
     )
 
     click.echo(f"Dropping all kg-memory-mcp tables from {db_name}@{db_host}:{db_port} ...")

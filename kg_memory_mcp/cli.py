@@ -45,6 +45,33 @@ def serve():
 
 
 # ============================================================
+# psql helpers
+# ============================================================
+
+def _find_psql() -> str:
+    """Find psql binary, exit if not found."""
+    import subprocess
+
+    for p in ["psql", "/opt/homebrew/opt/postgresql@18/bin/psql",
+              "/opt/homebrew/opt/postgresql@17/bin/psql", "/usr/local/bin/psql"]:
+        try:
+            subprocess.run([p, "--version"], capture_output=True, check=True)
+            return p
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            continue
+    click.echo("Error: psql not found. Please install PostgreSQL.", err=True)
+    sys.exit(1)
+
+
+def _psql_env(db_password: str) -> dict[str, str]:
+    """Build env dict with PGPASSWORD if password is provided."""
+    env = os.environ.copy()
+    if db_password:
+        env["PGPASSWORD"] = db_password
+    return env
+
+
+# ============================================================
 # init
 # ============================================================
 
@@ -53,37 +80,18 @@ def serve():
 @click.option("--db-user", envvar="KG_DB_USER", default="postgres", help="Database user")
 @click.option("--db-host", envvar="KG_DB_HOST", default="localhost", help="Database host")
 @click.option("--db-port", envvar="KG_DB_PORT", default="5432", help="Database port")
-def init(db_name: str, db_user: str, db_host: str, db_port: str):
+@click.option("--db-password", envvar="KG_DB_PASSWORD", default="", help="Database password")
+def init(db_name: str, db_user: str, db_host: str, db_port: str, db_password: str):
     """Create tables and indexes (execute schema.sql)."""
     import subprocess
 
     schema_path = files("kg_memory_mcp").joinpath("schema.sql")
-
-    # 尝试常见 psql 路径
-    psql_paths = [
-        "psql",
-        "/opt/homebrew/opt/postgresql@18/bin/psql",
-        "/opt/homebrew/opt/postgresql@17/bin/psql",
-        "/usr/local/bin/psql",
-    ]
-
-    psql_bin = None
-    for p in psql_paths:
-        try:
-            subprocess.run([p, "--version"], capture_output=True, check=True)
-            psql_bin = p
-            break
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            continue
-
-    if psql_bin is None:
-        click.echo("Error: psql not found. Please install PostgreSQL.", err=True)
-        sys.exit(1)
+    psql_bin = _find_psql()
 
     click.echo(f"Running schema.sql on {db_name}@{db_host}:{db_port} ...")
     result = subprocess.run(
         [psql_bin, "-h", db_host, "-p", db_port, "-U", db_user, "-d", db_name, "-f", str(schema_path)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=_psql_env(db_password),
     )
 
     if result.returncode != 0:
@@ -158,31 +166,13 @@ async def _collect(agent: str | None):
 @click.option("--db-user", envvar="KG_DB_USER", default="postgres", help="Database user")
 @click.option("--db-host", envvar="KG_DB_HOST", default="localhost", help="Database host")
 @click.option("--db-port", envvar="KG_DB_PORT", default="5432", help="Database port")
+@click.option("--db-password", envvar="KG_DB_PASSWORD", default="", help="Database password")
 @click.confirmation_option(prompt="This will DROP all kg-memory-mcp tables. Are you sure?")
-def reset(db_name: str, db_user: str, db_host: str, db_port: str):
+def reset(db_name: str, db_user: str, db_host: str, db_port: str, db_password: str):
     """Drop all kg-memory-mcp tables from the database."""
     import subprocess
 
-    # 尝试常见 psql 路径
-    psql_paths = [
-        "psql",
-        "/opt/homebrew/opt/postgresql@18/bin/psql",
-        "/opt/homebrew/opt/postgresql@17/bin/psql",
-        "/usr/local/bin/psql",
-    ]
-
-    psql_bin = None
-    for p in psql_paths:
-        try:
-            subprocess.run([p, "--version"], capture_output=True, check=True)
-            psql_bin = p
-            break
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            continue
-
-    if psql_bin is None:
-        click.echo("Error: psql not found. Please install PostgreSQL.", err=True)
-        sys.exit(1)
+    psql_bin = _find_psql()
 
     drop_sql = (
         "DROP TABLE IF EXISTS chat_attachments CASCADE; "
@@ -196,7 +186,7 @@ def reset(db_name: str, db_user: str, db_host: str, db_port: str):
     click.echo(f"Dropping all kg-memory-mcp tables from {db_name}@{db_host}:{db_port} ...")
     result = subprocess.run(
         [psql_bin, "-h", db_host, "-p", db_port, "-U", db_user, "-d", db_name, "-c", drop_sql],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=_psql_env(db_password),
     )
 
     if result.returncode != 0:
@@ -428,8 +418,15 @@ def _uninstall_codex_hook():
         click.echo("Codex hook not installed, nothing to uninstall.")
         return
 
-    # 只移除包含 notify = [...kg-memory-mcp...] 的行
-    filtered = _re.sub(r'^notify\s*=\s*\[.*kg-memory-mcp.*\]\s*\n?', '', content, flags=_re.MULTILINE)
+    # 精确匹配我们安装的那一行，避免误删用户其他 notify 配置
+    exact_pattern = r'^notify\s*=\s*\["kg-memory-mcp",\s*"hooks",\s*"run",\s*"codex"\]\s*\n?'
+    if _re.search(exact_pattern, content, _re.MULTILINE):
+        filtered = _re.sub(exact_pattern, '', content, flags=_re.MULTILINE)
+    else:
+        # notify 行含 kg-memory-mcp 但格式不匹配（用户手动编辑过），提示手动处理
+        click.echo("Warning: notify config contains kg-memory-mcp but in unexpected format.", err=True)
+        click.echo("Please manually remove kg-memory-mcp from ~/.codex/config.toml", err=True)
+        return
 
     fd, tmp_path = tempfile.mkstemp(dir=config_path.parent, suffix=".tmp")
     try:

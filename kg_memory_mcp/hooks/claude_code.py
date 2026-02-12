@@ -319,7 +319,7 @@ async def run():
         resolved = Path(transcript_path).resolve()
         allowed_prefixes = [
             Path.home() / ".claude",
-            Path("/tmp"),
+            Path("/tmp").resolve(),  # macOS: /tmp → /private/tmp
         ]
         if not any(resolved.is_relative_to(p) for p in allowed_prefixes):
             log.warning("Transcript path outside allowed directories")

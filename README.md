@@ -148,14 +148,16 @@ args = ["kg-memory-mcp", "serve"]
 kg-memory-mcp [OPTIONS] COMMAND [ARGS]
 
 Commands:
-  serve                Start the MCP server (stdio transport)
-  init                 Create tables and indexes (execute schema.sql)
-  migrate JSONL_PATH   Migrate from memory.jsonl (mcp-server-memory format)
-  collect              Collect conversation transcripts from AI agents
-    --agent TEXT        Only collect from: claude-code, codex, gemini-cli
-  hooks install AGENT  Install hook for a specific agent
-  hooks status         Check installation status of all hooks
-  hooks run AGENT      Run a hook directly (called by agent integrations)
+  serve                  Start the MCP server (stdio transport)
+  init                   Create tables and indexes (execute schema.sql)
+  migrate JSONL_PATH     Migrate from memory.jsonl (mcp-server-memory format)
+  collect                Collect conversation transcripts from AI agents
+    --agent TEXT          Only collect from: claude-code, codex, gemini-cli
+  reset                  Drop all kg-memory-mcp tables (with confirmation)
+  hooks install AGENT    Install hook for a specific agent
+  hooks uninstall AGENT  Remove hook for a specific agent
+  hooks status           Check installation status of all hooks
+  hooks run AGENT        Run a hook directly (called by agent integrations)
 ```
 
 ### Examples
@@ -178,6 +180,9 @@ kg-memory-mcp collect --agent claude-code
 
 # Install auto-archival hook for Claude Code
 kg-memory-mcp hooks install claude-code
+
+# Uninstall a hook
+kg-memory-mcp hooks uninstall claude-code
 
 # Check hook status
 kg-memory-mcp hooks status
@@ -211,6 +216,25 @@ kg-memory-mcp hooks status
 - **Gemini knowledge extraction** (opt-in): If you set the `GEMINI_API_KEY` environment variable, the SessionEnd hooks will send conversation summaries (up to 15KB) to Google's Gemini API for knowledge extraction. This is **disabled by default** -- without the API key, no data is sent externally. If you use this feature, be aware that conversation content (including project paths and code snippets) will be transmitted to Google.
 - **Hook transcript access**: Hooks only read transcript files from expected directories (`~/.claude/`, `~/.codex/`, `~/.gemini/`). Path traversal is validated.
 - **Sensitive content filtering**: The `quality.py` module automatically filters out API keys, passwords, and tokens before writing to the knowledge graph.
+
+## Uninstall
+
+```bash
+# 1. Remove hooks from all agents
+kg-memory-mcp hooks uninstall claude-code
+kg-memory-mcp hooks uninstall codex
+kg-memory-mcp hooks uninstall gemini
+
+# 2. (Optional) Drop all tables from the database
+kg-memory-mcp reset
+
+# 3. Remove the MCP server config from your client
+#    Delete the "kg-memory" entry from mcpServers in your settings
+
+# 4. Uninstall the package
+pip uninstall kg-memory-mcp    # if installed via pip
+uv tool uninstall kg-memory-mcp  # if installed via uv
+```
 
 ## Development
 

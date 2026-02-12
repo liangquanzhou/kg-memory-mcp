@@ -135,12 +135,69 @@ async def _collect(agent: str | None):
 
 
 # ============================================================
+# reset
+# ============================================================
+
+@main.command()
+@click.option("--db-name", envvar="KG_DB_NAME", default="knowledge_base", help="Database name")
+@click.option("--db-user", envvar="KG_DB_USER", default="postgres", help="Database user")
+@click.option("--db-host", envvar="KG_DB_HOST", default="localhost", help="Database host")
+@click.option("--db-port", envvar="KG_DB_PORT", default="5432", help="Database port")
+@click.confirmation_option(prompt="This will DROP all kg-memory-mcp tables. Are you sure?")
+def reset(db_name: str, db_user: str, db_host: str, db_port: str):
+    """Drop all kg-memory-mcp tables from the database."""
+    import subprocess
+
+    # 尝试常见 psql 路径
+    psql_paths = [
+        "psql",
+        "/opt/homebrew/opt/postgresql@18/bin/psql",
+        "/opt/homebrew/opt/postgresql@17/bin/psql",
+        "/usr/local/bin/psql",
+    ]
+
+    psql_bin = None
+    for p in psql_paths:
+        try:
+            subprocess.run([p, "--version"], capture_output=True, check=True)
+            psql_bin = p
+            break
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            continue
+
+    if psql_bin is None:
+        click.echo("Error: psql not found. Please install PostgreSQL.", err=True)
+        sys.exit(1)
+
+    drop_sql = (
+        "DROP TABLE IF EXISTS chat_attachments CASCADE; "
+        "DROP TABLE IF EXISTS chat_messages CASCADE; "
+        "DROP TABLE IF EXISTS chat_sessions CASCADE; "
+        "DROP TABLE IF EXISTS kg_relations CASCADE; "
+        "DROP TABLE IF EXISTS kg_observations CASCADE; "
+        "DROP TABLE IF EXISTS kg_entities CASCADE;"
+    )
+
+    click.echo(f"Dropping all kg-memory-mcp tables from {db_name}@{db_host}:{db_port} ...")
+    result = subprocess.run(
+        [psql_bin, "-h", db_host, "-p", db_port, "-U", db_user, "-d", db_name, "-c", drop_sql],
+        capture_output=True, text=True,
+    )
+
+    if result.returncode != 0:
+        click.echo(f"Error:\n{result.stderr}", err=True)
+        sys.exit(1)
+
+    click.echo("All kg-memory-mcp tables dropped successfully.")
+
+
+# ============================================================
 # hooks
 # ============================================================
 
 @main.group()
 def hooks():
-    """Manage agent hooks (install, status)."""
+    """Manage agent hooks (install, uninstall, status)."""
 
 
 HOOK_AGENTS = {
@@ -176,6 +233,20 @@ def hooks_install(agent: str):
         _install_gemini_hook()
     elif agent == "opencode":
         click.echo("OpenCode plugin: not yet implemented. Copy hooks/opencode.ts manually.")
+
+
+@hooks.command("uninstall")
+@click.argument("agent", type=click.Choice(list(HOOK_AGENTS.keys())))
+def hooks_uninstall(agent: str):
+    """Uninstall hook for a specific agent."""
+    if agent == "claude-code":
+        _uninstall_claude_code_hook()
+    elif agent == "codex":
+        _uninstall_codex_hook()
+    elif agent == "gemini":
+        _uninstall_gemini_hook()
+    elif agent == "opencode":
+        click.echo("OpenCode plugin: manual removal required.")
 
 
 def _hook_command_exists(entries: list, keyword: str) -> bool:
@@ -277,6 +348,93 @@ def _install_gemini_hook():
         json.dump(settings, f, indent=2, ensure_ascii=False)
 
     click.echo(f"Installed Gemini hook → {settings_path}")
+
+
+def _uninstall_claude_code_hook():
+    """Remove kg-memory-mcp hook from ~/.claude/settings.json"""
+    settings_path = Path.home() / ".claude" / "settings.json"
+    if not settings_path.exists():
+        click.echo("Claude Code settings not found, nothing to uninstall.")
+        return
+
+    with open(settings_path) as f:
+        settings = json.load(f)
+
+    session_end = settings.get("hooks", {}).get("SessionEnd", [])
+    if not _hook_command_exists(session_end, "kg-memory-mcp"):
+        click.echo("Claude Code hook not installed, nothing to uninstall.")
+        return
+
+    # Filter out entries containing kg-memory-mcp
+    filtered = [
+        entry for entry in session_end
+        if not any("kg-memory-mcp" in h.get("command", "") for h in entry.get("hooks", []))
+        and "kg-memory-mcp" not in entry.get("command", "")
+    ]
+    settings["hooks"]["SessionEnd"] = filtered
+
+    # Clean up empty structures
+    if not filtered:
+        del settings["hooks"]["SessionEnd"]
+    if not settings["hooks"]:
+        del settings["hooks"]
+
+    with open(settings_path, "w") as f:
+        json.dump(settings, f, indent=2, ensure_ascii=False)
+
+    click.echo(f"Uninstalled Claude Code hook from {settings_path}")
+
+
+def _uninstall_codex_hook():
+    """Remove kg-memory-mcp notify from ~/.codex/config.toml"""
+    config_path = Path.home() / ".codex" / "config.toml"
+    if not config_path.exists():
+        click.echo("Codex config not found, nothing to uninstall.")
+        return
+
+    content = config_path.read_text()
+    if "kg-memory-mcp" not in content:
+        click.echo("Codex hook not installed, nothing to uninstall.")
+        return
+
+    lines = content.splitlines(keepends=True)
+    filtered = [line for line in lines if "kg-memory-mcp" not in line]
+    config_path.write_text("".join(filtered))
+
+    click.echo(f"Uninstalled Codex hook from {config_path}")
+
+
+def _uninstall_gemini_hook():
+    """Remove kg-memory-mcp hook from ~/.gemini/settings.json"""
+    settings_path = Path.home() / ".gemini" / "settings.json"
+    if not settings_path.exists():
+        click.echo("Gemini settings not found, nothing to uninstall.")
+        return
+
+    with open(settings_path) as f:
+        settings = json.load(f)
+
+    session_end = settings.get("hooks", {}).get("SessionEnd", [])
+    if not _hook_command_exists(session_end, "kg-memory-mcp"):
+        click.echo("Gemini hook not installed, nothing to uninstall.")
+        return
+
+    filtered = [
+        entry for entry in session_end
+        if not any("kg-memory-mcp" in h.get("command", "") for h in entry.get("hooks", []))
+        and "kg-memory-mcp" not in entry.get("command", "")
+    ]
+    settings["hooks"]["SessionEnd"] = filtered
+
+    if not filtered:
+        del settings["hooks"]["SessionEnd"]
+    if not settings["hooks"]:
+        del settings["hooks"]
+
+    with open(settings_path, "w") as f:
+        json.dump(settings, f, indent=2, ensure_ascii=False)
+
+    click.echo(f"Uninstalled Gemini hook from {settings_path}")
 
 
 @hooks.command("run")

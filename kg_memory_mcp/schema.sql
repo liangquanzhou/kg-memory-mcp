@@ -47,6 +47,9 @@ CREATE INDEX IF NOT EXISTS idx_kg_observations_embedding ON kg_observations USIN
 CREATE INDEX IF NOT EXISTS idx_kg_observations_fts ON kg_observations USING GIN (search_vector);
 CREATE INDEX IF NOT EXISTS idx_kg_observations_entity ON kg_observations (entity_id);
 CREATE INDEX IF NOT EXISTS idx_kg_observations_hash ON kg_observations (content_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kg_observations_dedup ON kg_observations (entity_id, content_hash);
+CREATE INDEX IF NOT EXISTS idx_kg_relations_from ON kg_relations (from_entity_id);
+CREATE INDEX IF NOT EXISTS idx_kg_relations_to ON kg_relations (to_entity_id);
 
 -- ============================================================
 -- 对话存档层 (chat_ 前缀)

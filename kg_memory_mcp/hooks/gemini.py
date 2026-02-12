@@ -44,11 +44,14 @@ def _setup_logging():
     )
 
 
+DB_PASSWORD = os.environ.get("KG_DB_PASSWORD", "")
+
+
 async def _get_conn() -> asyncpg.Connection:
-    return await asyncpg.connect(
-        database=DB_NAME, user=DB_USER, host=DB_HOST, port=int(DB_PORT),
-        timeout=10,
-    )
+    kwargs: dict = dict(database=DB_NAME, user=DB_USER, host=DB_HOST, port=int(DB_PORT), timeout=10)
+    if DB_PASSWORD:
+        kwargs["password"] = DB_PASSWORD
+    return await asyncpg.connect(**kwargs)
 
 
 def _get_embedding(text: str) -> list[float] | None:
@@ -57,6 +60,7 @@ def _get_embedding(text: str) -> list[float] | None:
             f"{OLLAMA_BASE_URL}/api/embed",
             json={"model": OLLAMA_EMBED_MODEL, "input": text},
             timeout=30.0,
+            trust_env=False,
         )
         resp.raise_for_status()
         return resp.json()["embeddings"][0]
@@ -221,9 +225,13 @@ async def _save_to_kg(conn: asyncpg.Connection, memories: list, source: str):
     assert row is not None
     entity_id = row["id"]
 
+    from ..quality import contains_sensitive
+
     saved = 0
     for memory in memories:
         content = f"[Gemini CLI: {source}] {memory}"
+        if contains_sensitive(content):
+            continue
 
         content_hash = hashlib.sha256(content.encode()).hexdigest()
         exists = await conn.fetchval(

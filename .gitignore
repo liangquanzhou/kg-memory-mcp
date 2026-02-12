@@ -16,7 +16,11 @@ env/
 
 # Environment variables
 .env
+.env.*
 !.env.example
+
+# Logs
+*.log
 
 # Type checking / linting / testing caches
 .mypy_cache/

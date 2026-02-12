@@ -128,13 +128,22 @@ async def search_chats(query: str, agent: str | None = None, limit: int = 20) ->
     return [dict(r) for r in rows]
 
 
-async def get_session(session_id: int | None = None, native_session_id: str | None = None) -> dict | None:
+async def get_session(
+    session_id: int | None = None,
+    native_session_id: str | None = None,
+    agent: str | None = None,
+) -> dict | None:
     """获取完整会话（含消息）"""
     pool = await get_pool()
 
     if session_id:
         session = await pool.fetchrow(
             "SELECT * FROM chat_sessions WHERE id = $1", session_id
+        )
+    elif native_session_id and agent:
+        session = await pool.fetchrow(
+            "SELECT * FROM chat_sessions WHERE agent = $1 AND native_session_id = $2",
+            agent, native_session_id,
         )
     elif native_session_id:
         session = await pool.fetchrow(

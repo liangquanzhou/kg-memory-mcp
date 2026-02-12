@@ -17,9 +17,8 @@ kg-memory-mcp serve
 ```
 
 ## 数据库
-- psql 路径: `/opt/homebrew/opt/postgresql@18/bin/psql`
 - 建表: `kg-memory-mcp init`
-- 已有表 documents / doc_meta 不要动
+- 默认数据库: `knowledge_base`
 
 ## 项目结构
 - kg_memory_mcp/server.py: MCP 入口，注册所有工具

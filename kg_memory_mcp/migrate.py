@@ -8,6 +8,7 @@ import click
 from .db import close_pool, get_pool
 from .embedding import close as close_embedding
 from .embedding import get_embedding
+from .quality import contains_sensitive
 
 
 def parse_jsonl(path: str) -> tuple[list[dict], list[dict]]:
@@ -116,11 +117,14 @@ async def migrate(jsonl_path: str):
         entity_id = row["id"]
 
         for obs in observations:
+            if contains_sensitive(obs):
+                continue
             obs_emb = await get_embedding(obs)
             await pool.execute(
                 """
                 INSERT INTO kg_observations (entity_id, content, embedding, source_agent)
                 VALUES ($1, $2, $3, 'migration')
+                ON CONFLICT (entity_id, content_hash) DO NOTHING
                 """,
                 entity_id, obs, obs_emb,
             )

@@ -1,7 +1,6 @@
 """Tests for collector parsers"""
 import json
 import tempfile
-from datetime import datetime, timezone
 
 from kg_memory_mcp.collector.claude_code import parse_claude_code_session
 from kg_memory_mcp.collector.codex import parse_codex_session

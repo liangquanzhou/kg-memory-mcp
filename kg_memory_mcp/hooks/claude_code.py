@@ -44,12 +44,15 @@ def _setup_logging():
     )
 
 
+DB_PASSWORD = os.environ.get("KG_DB_PASSWORD", "")
+
+
 async def _get_conn() -> asyncpg.Connection:
     """获取短生命周期 DB 连接（hook 用，非连接池）"""
-    return await asyncpg.connect(
-        database=DB_NAME, user=DB_USER, host=DB_HOST, port=int(DB_PORT),
-        timeout=10,
-    )
+    kwargs: dict = dict(database=DB_NAME, user=DB_USER, host=DB_HOST, port=int(DB_PORT), timeout=10)
+    if DB_PASSWORD:
+        kwargs["password"] = DB_PASSWORD
+    return await asyncpg.connect(**kwargs)
 
 
 def _get_embedding(text: str) -> list[float] | None:
@@ -59,6 +62,7 @@ def _get_embedding(text: str) -> list[float] | None:
             f"{OLLAMA_BASE_URL}/api/embed",
             json={"model": OLLAMA_EMBED_MODEL, "input": text},
             timeout=30.0,
+            trust_env=False,
         )
         resp.raise_for_status()
         return resp.json()["embeddings"][0]
@@ -263,9 +267,13 @@ async def _save_to_kg(conn: asyncpg.Connection, memories: list, cwd: str):
     assert row is not None
     entity_id = row["id"]
 
+    from ..quality import contains_sensitive
+
     saved = 0
     for memory in memories:
         content = f"[{cwd}] {memory}"
+        if contains_sensitive(content):
+            continue
         content_hash = hashlib.sha256(content.encode()).hexdigest()
 
         exists = await conn.fetchval(
@@ -307,17 +315,17 @@ async def run():
             log.info("No transcript file, skipping")
             return
 
-        # 路径安全校验：只允许读取 Claude Code 已知目录下的文件
+        # 路径安全校验：resolve() 后用 is_relative_to 防 symlink 绕过，并用 resolved 路径操作 (防 TOCTOU)
         resolved = Path(transcript_path).resolve()
         allowed_prefixes = [
             Path.home() / ".claude",
             Path("/tmp"),
         ]
-        if not any(str(resolved).startswith(str(p)) for p in allowed_prefixes):
-            log.warning(f"Transcript path outside allowed directories: {resolved}")
+        if not any(resolved.is_relative_to(p) for p in allowed_prefixes):
+            log.warning("Transcript path outside allowed directories")
             return
 
-        messages = _read_transcript(transcript_path)
+        messages = _read_transcript(str(resolved))
         user_turns = sum(1 for m in messages if m.get("type") == "user")
 
         # 连接数据库

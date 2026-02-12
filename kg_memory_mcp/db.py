@@ -1,5 +1,6 @@
 """知识图谱数据库操作层 (asyncpg)"""
 
+import asyncio
 import hashlib
 import json
 import os
@@ -11,12 +12,17 @@ from .embedding import get_embedding
 from .quality import contains_sensitive, is_duplicate_hash, is_duplicate_semantic
 
 _pool: asyncpg.Pool | None = None
+_pool_lock = asyncio.Lock()
 
 
 async def get_pool() -> asyncpg.Pool:
     global _pool
-    if _pool is None:
-        _pool = await asyncpg.create_pool(
+    if _pool is not None:
+        return _pool
+    async with _pool_lock:
+        if _pool is not None:
+            return _pool
+        kwargs: dict = dict(
             database=os.getenv("KG_DB_NAME", "knowledge_base"),
             user=os.getenv("KG_DB_USER", "postgres"),
             host=os.getenv("KG_DB_HOST", "localhost"),
@@ -27,6 +33,10 @@ async def get_pool() -> asyncpg.Pool:
             timeout=10,
             init=register_vector,
         )
+        password = os.getenv("KG_DB_PASSWORD")
+        if password:
+            kwargs["password"] = password
+        _pool = await asyncpg.create_pool(**kwargs)
     return _pool
 
 
@@ -138,6 +148,7 @@ async def add_observations(entity_name: str, observations: list[str], source_age
             """
             INSERT INTO kg_observations (entity_id, content, embedding, source_agent)
             VALUES ($1, $2, $3, $4)
+            ON CONFLICT (entity_id, content_hash) DO NOTHING
             """,
             entity_id, content, emb, source_agent,
         )

@@ -69,6 +69,8 @@ async def delete_relations(relations: list[dict]) -> str:
 @mcp.tool()
 async def search_nodes(query: str, limit: int = 10) -> str:
     """Search the knowledge graph using hybrid FTS + vector search with 1-hop graph expansion."""
+    query = query[:2000]
+    limit = min(max(limit, 1), 100)
     results = await search_mod.search(query, limit=limit)
     return json.dumps(results, ensure_ascii=False)
 
@@ -93,6 +95,8 @@ async def search_chats(query: str, agent: str | None = None, limit: int = 20) ->
         agent: Filter by agent name (e.g. 'claude-code', 'codex', 'gemini-cli')
         limit: Max results (default 20)
     """
+    query = query[:2000]
+    limit = min(max(limit, 1), 100)
     results = await chat_db.search_chats(query, agent=agent, limit=limit)
     # 序列化 datetime
     for r in results:
@@ -102,14 +106,19 @@ async def search_chats(query: str, agent: str | None = None, limit: int = 20) ->
 
 
 @mcp.tool()
-async def get_session(sessionId: int | None = None, nativeSessionId: str | None = None) -> str:
+async def get_session(
+    sessionId: int | None = None,
+    nativeSessionId: str | None = None,
+    agent: str | None = None,
+) -> str:
     """Get a complete chat session with all messages.
 
     Args:
         sessionId: Database session ID
         nativeSessionId: Agent's native session ID (e.g. ses_xxx for Claude Code)
+        agent: Agent name (recommended when using nativeSessionId to avoid ambiguity)
     """
-    result = await chat_db.get_session(session_id=sessionId, native_session_id=nativeSessionId)
+    result = await chat_db.get_session(session_id=sessionId, native_session_id=nativeSessionId, agent=agent)
     if result is None:
         return json.dumps({"error": "Session not found"})
     # 序列化 datetime
@@ -131,6 +140,8 @@ async def list_sessions(agent: str | None = None, limit: int = 20, offset: int =
         limit: Max results (default 20)
         offset: Pagination offset
     """
+    limit = min(max(limit, 1), 100)
+    offset = max(offset, 0)
     results = await chat_db.list_sessions(agent=agent, limit=limit, offset=offset)
     for r in results:
         for key in ("started_at", "ended_at"):

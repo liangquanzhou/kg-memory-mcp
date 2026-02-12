@@ -19,6 +19,7 @@ def _get_client() -> httpx.AsyncClient:
             base_url=OLLAMA_BASE_URL,
             timeout=30.0,
             transport=httpx.AsyncHTTPTransport(retries=2),
+            trust_env=False,  # 不走系统代理，确保数据不出本机
         )
     return _client
 

@@ -4,12 +4,27 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
 from importlib.resources import files
 from pathlib import Path
 
 import click
 
 from . import __version__
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """原子写入 JSON 文件：先写临时文件再 rename，防中断导致半写"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp_path, path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
 
 
 @click.group()
@@ -290,28 +305,44 @@ def _install_claude_code_hook():
     }
     session_end.append(hook_entry)
 
-    with open(settings_path, "w") as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
+    _atomic_write_json(settings_path, settings)
 
     click.echo(f"Installed Claude Code hook → {settings_path}")
 
 
 def _install_codex_hook():
     """Install Codex notify hook into ~/.codex/config.toml"""
+    import re as _re
+
     config_path = Path.home() / ".codex" / "config.toml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 检查是否已安装
-    if config_path.exists():
-        content = config_path.read_text()
-        if "kg-memory-mcp" in content:
-            click.echo("Codex hook already installed.")
-            return
+    content = config_path.read_text() if config_path.exists() else ""
+    if "kg-memory-mcp" in content:
+        click.echo("Codex hook already installed.")
+        return
 
-    # 追加 notify 配置
-    notify_line = '\nnotify = ["kg-memory-mcp", "hooks", "run", "codex"]\n'
-    with open(config_path, "a") as f:
-        f.write(notify_line)
+    notify_line = 'notify = ["kg-memory-mcp", "hooks", "run", "codex"]'
+
+    # 如果已有 notify = [...] 行，追加到数组中而不是新建一行
+    if _re.search(r'^notify\s*=\s*\[', content, _re.MULTILINE):
+        click.echo("Warning: existing notify config found. Please manually add kg-memory-mcp.", err=True)
+        return
+
+    # 确保末尾有换行再追加
+    if content and not content.endswith("\n"):
+        content += "\n"
+    content += notify_line + "\n"
+
+    # 原子写入：写临时文件再 rename
+    fd, tmp_path = tempfile.mkstemp(dir=config_path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.replace(tmp_path, config_path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
 
     click.echo(f"Installed Codex hook → {config_path}")
 
@@ -344,8 +375,7 @@ def _install_gemini_hook():
     }
     session_end.append(hook_entry)
 
-    with open(settings_path, "w") as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
+    _atomic_write_json(settings_path, settings)
 
     click.echo(f"Installed Gemini hook → {settings_path}")
 
@@ -379,14 +409,15 @@ def _uninstall_claude_code_hook():
     if not settings["hooks"]:
         del settings["hooks"]
 
-    with open(settings_path, "w") as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
+    _atomic_write_json(settings_path, settings)
 
     click.echo(f"Uninstalled Claude Code hook from {settings_path}")
 
 
 def _uninstall_codex_hook():
     """Remove kg-memory-mcp notify from ~/.codex/config.toml"""
+    import re as _re
+
     config_path = Path.home() / ".codex" / "config.toml"
     if not config_path.exists():
         click.echo("Codex config not found, nothing to uninstall.")
@@ -397,9 +428,17 @@ def _uninstall_codex_hook():
         click.echo("Codex hook not installed, nothing to uninstall.")
         return
 
-    lines = content.splitlines(keepends=True)
-    filtered = [line for line in lines if "kg-memory-mcp" not in line]
-    config_path.write_text("".join(filtered))
+    # 只移除包含 notify = [...kg-memory-mcp...] 的行
+    filtered = _re.sub(r'^notify\s*=\s*\[.*kg-memory-mcp.*\]\s*\n?', '', content, flags=_re.MULTILINE)
+
+    fd, tmp_path = tempfile.mkstemp(dir=config_path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(filtered)
+        os.replace(tmp_path, config_path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
 
     click.echo(f"Uninstalled Codex hook from {config_path}")
 
@@ -431,8 +470,7 @@ def _uninstall_gemini_hook():
     if not settings["hooks"]:
         del settings["hooks"]
 
-    with open(settings_path, "w") as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
+    _atomic_write_json(settings_path, settings)
 
     click.echo(f"Uninstalled Gemini hook from {settings_path}")
 
@@ -476,8 +514,9 @@ def hooks_status():
                         if _hook_command_exists(event_hooks, "kg-memory-mcp"):
                             installed = True
                             break
-            except Exception:
-                pass
+            except Exception as e:
+                click.echo(f"  {agent:15s} {'error':15s} ({settings_path}): {e}", err=True)
+                continue
 
         status = "installed" if installed else "not installed"
         click.echo(f"  {agent:15s} {status:15s} ({settings_path})")

@@ -22,6 +22,7 @@ DB_NAME = os.environ.get("KG_DB_NAME", "knowledge_base")
 DB_USER = os.environ.get("KG_DB_USER", "postgres")
 DB_HOST = os.environ.get("KG_DB_HOST", "localhost")
 DB_PORT = os.environ.get("KG_DB_PORT", "5432")
+DB_PASSWORD = os.environ.get("KG_DB_PASSWORD", "")
 
 CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 
@@ -38,10 +39,10 @@ def _setup_logging():
 
 
 async def _get_conn() -> asyncpg.Connection:
-    return await asyncpg.connect(
-        database=DB_NAME, user=DB_USER, host=DB_HOST, port=int(DB_PORT),
-        timeout=10,
-    )
+    kwargs: dict = dict(database=DB_NAME, user=DB_USER, host=DB_HOST, port=int(DB_PORT), timeout=10)
+    if DB_PASSWORD:
+        kwargs["password"] = DB_PASSWORD
+    return await asyncpg.connect(**kwargs)
 
 
 def _find_latest_session() -> Path | None:

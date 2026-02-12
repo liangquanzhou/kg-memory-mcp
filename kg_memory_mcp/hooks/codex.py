@@ -51,11 +51,16 @@ async def _get_conn() -> asyncpg.Connection:
 
 
 def _find_session_by_id(session_id: str) -> Path | None:
-    """按 session_id 精确匹配 Codex 会话文件，避免并发串档"""
+    """按 session_id 精确匹配 Codex 会话文件，避免并发串档
+
+    Codex 文件名格式: rollout-{date}T{time}-{session_id}.jsonl
+    用 endswith 确保 ID 位于文件名末尾，避免子串误匹配。
+    """
     if not session_id or not CODEX_SESSIONS_DIR.exists():
         return None
+    suffix = f"-{session_id}.jsonl"
     for f in CODEX_SESSIONS_DIR.glob("**/*.jsonl"):
-        if session_id in f.name:
+        if f.name.endswith(suffix):
             return f
     return None
 
@@ -244,6 +249,8 @@ async def run():
         sid = payload.get("session_id", "")
         session_path = _find_session_by_id(sid) if sid else None
         if session_path is None:
+            if sid:
+                log.warning(f"Session file not found for id={sid[:12]}..., falling back to latest")
             session_path = _find_latest_session()
         if not session_path:
             log.info("No session file found")

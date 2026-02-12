@@ -287,6 +287,8 @@ async def run():
         sid = hook_input.get("session_id", "")
         session_path = _find_session_by_id(sid) if sid else None
         if session_path is None:
+            if sid:
+                log.warning(f"Session file not found for id={sid[:12]}..., falling back to latest")
             session_path = _find_latest_session()
         if not session_path:
             log.info("No session file found")

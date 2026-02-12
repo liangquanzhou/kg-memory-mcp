@@ -43,17 +43,38 @@ def parse_gemini_session(filepath: str) -> dict | None:
         raw = msg.get("content", "")
 
         # content 可能是 string 或 list
+        attachments: list[dict] = []
         if isinstance(raw, list):
-            content = "\n".join(
-                p.get("text", "") if isinstance(p, dict) else str(p)
-                for p in raw
-            )
+            texts = []
+            for p in raw:
+                if isinstance(p, dict):
+                    if "inlineData" in p:
+                        inline = p["inlineData"]
+                        mime = inline.get("mimeType", "")
+                        if mime.startswith("image/") and inline.get("data"):
+                            attachments.append({"media_type": mime, "data": inline["data"]})
+                    else:
+                        texts.append(p.get("text", ""))
+                else:
+                    texts.append(str(p))
+            content = "\n".join(texts)
         elif isinstance(raw, str):
             content = raw
         else:
             content = str(raw) if raw else ""
 
-        if not content.strip():
+        # Extract images from toolCalls[].result[].functionResponse.parts[].inlineData
+        for tc in msg.get("toolCalls", []):
+            for r in tc.get("result", []):
+                fr = r.get("functionResponse", {})
+                for part in fr.get("parts", []):
+                    if isinstance(part, dict) and "inlineData" in part:
+                        inline = part["inlineData"]
+                        mime = inline.get("mimeType", "")
+                        if mime.startswith("image/") and inline.get("data"):
+                            attachments.append({"media_type": mime, "data": inline["data"]})
+
+        if not content.strip() and not attachments:
             continue
 
         # gemini → assistant
@@ -63,15 +84,23 @@ def parse_gemini_session(filepath: str) -> dict | None:
         if "--- Content from referenced files ---" in content:
             content = content[:content.index("--- Content from referenced files ---")].strip()
 
-        if not content:
+        if not content and not attachments:
             continue
 
-        messages.append({
+        meta: dict = {}
+        if attachments:
+            meta["has_images"] = True
+            meta["image_count"] = len(attachments)
+
+        msg_data: dict = {
             "role": role,
             "content": content[:50000],
-            "meta": {},
+            "meta": meta,
             "created_at": ts,
-        })
+        }
+        if attachments:
+            msg_data["attachments"] = attachments
+        messages.append(msg_data)
 
     if not messages:
         return None

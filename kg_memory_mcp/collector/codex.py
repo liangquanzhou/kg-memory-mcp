@@ -56,31 +56,44 @@ def parse_codex_session(filepath: str) -> dict | None:
                 content_parts = payload.get("content") or []
 
                 texts = []
+                attachments = []
                 for part in content_parts:
                     if isinstance(part, dict):
-                        if part.get("type") == "input_text":
+                        ptype = part.get("type", "")
+                        if ptype in ("input_text", "output_text", "text"):
                             texts.append(part.get("text", ""))
-                        elif part.get("type") == "output_text":
-                            texts.append(part.get("text", ""))
-                        elif part.get("type") == "text":
-                            texts.append(part.get("text", ""))
+                        elif ptype == "input_image":
+                            # Format: {"type": "input_image", "image_url": "data:image/png;base64,..."}
+                            data_url = part.get("image_url", "")
+                            if data_url.startswith("data:") and ";base64," in data_url:
+                                header, b64 = data_url.split(";base64,", 1)
+                                media_type = header.removeprefix("data:")
+                                attachments.append({"media_type": media_type, "data": b64})
                     elif isinstance(part, str):
                         texts.append(part)
 
                 content = "\n".join(texts)
-                if not content.strip():
+                if not content.strip() and not attachments:
                     continue
 
                 # 跳过 environment_context 系统消息
                 if "<environment_context>" in content and len(content) < 500:
                     continue
 
-                messages.append({
+                meta: dict = {}
+                if attachments:
+                    meta["has_images"] = True
+                    meta["image_count"] = len(attachments)
+
+                msg_data: dict = {
                     "role": role or "user",
                     "content": content[:50000],
-                    "meta": {},
+                    "meta": meta,
                     "created_at": ts,
-                })
+                }
+                if attachments:
+                    msg_data["attachments"] = attachments
+                messages.append(msg_data)
 
             elif record_type == "event_msg":
                 msg_type = payload.get("type", "")

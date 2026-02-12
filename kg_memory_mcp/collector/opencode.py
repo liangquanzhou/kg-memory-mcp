@@ -73,6 +73,7 @@ def parse_opencode_session(session_path: Path) -> dict | None:
 
         texts = []
         tool_count = 0
+        attachments = []
         for part_file in sorted(parts_dir.iterdir()):
             part = _load_json(part_file)
             if not part:
@@ -86,23 +87,36 @@ def parse_opencode_session(session_path: Path) -> dict | None:
                 result = part.get("result", "")
                 if isinstance(result, str) and result.strip():
                     texts.append(f"[Result: {result[:500]}]")
+            elif ptype == "file":
+                # Format: {"type": "file", "mime": "image/png", "url": "data:...;base64,..."}
+                mime = part.get("mime", "")
+                data_url = part.get("url", "")
+                if mime.startswith("image/") and data_url.startswith("data:") and ";base64," in data_url:
+                    _, b64 = data_url.split(";base64,", 1)
+                    attachments.append({"media_type": mime, "data": b64})
 
         content = "\n".join(texts).strip()
-        if not content:
+        if not content and not attachments:
             continue
 
         meta: dict = {}
         if tool_count:
             meta["tool_count"] = tool_count
+        if attachments:
+            meta["has_images"] = True
+            meta["image_count"] = len(attachments)
         if model_id:
             meta["model"] = model_id
 
-        messages.append({
+        msg_data: dict = {
             "role": role,
             "content": content[:50000],
             "meta": meta,
             "created_at": created,
-        })
+        }
+        if attachments:
+            msg_data["attachments"] = attachments
+        messages.append(msg_data)
 
     if not messages:
         return None

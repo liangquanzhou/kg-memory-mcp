@@ -45,7 +45,7 @@ def _setup_logging():
 
 
 DB_PASSWORD = os.environ.get("KG_DB_PASSWORD", "")
-
+CHAT_SANITIZE = os.environ.get("KG_CHAT_SANITIZE", "").lower() in ("1", "true", "yes")
 
 DB_SSL = os.environ.get("KG_DB_SSL", "")
 
@@ -150,12 +150,18 @@ async def _archive_conversation(conn: asyncpg.Connection, messages: list[dict], 
         return
 
     for m in messages:
+        content = m["content"] or ""
+        # KG_CHAT_SANITIZE=true 时跳过含敏感信息的消息
+        if CHAT_SANITIZE and content:
+            from ..quality import contains_sensitive as _chk
+            if _chk(content):
+                continue
         await conn.execute(
             """
             INSERT INTO chat_messages (session_id, role, content, meta, created_at)
             VALUES ($1, $2, $3, $4, $5)
             """,
-            db_session_id, m["role"], m["content"],
+            db_session_id, m["role"], content,
             json.dumps(m.get("meta", {})), m["created_at"],
         )
 

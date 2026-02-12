@@ -23,6 +23,7 @@ DB_USER = os.environ.get("KG_DB_USER", "postgres")
 DB_HOST = os.environ.get("KG_DB_HOST", "localhost")
 DB_PORT = os.environ.get("KG_DB_PORT", "5432")
 DB_PASSWORD = os.environ.get("KG_DB_PASSWORD", "")
+CHAT_SANITIZE = os.environ.get("KG_CHAT_SANITIZE", "").lower() in ("1", "true", "yes")
 
 CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 
@@ -205,12 +206,18 @@ async def _archive_session(conn: asyncpg.Connection, session: dict) -> int:
     new_messages = session["messages"][existing:]
     count = 0
     for msg in new_messages:
+        content = msg.get("content") or ""
+        # KG_CHAT_SANITIZE=true 时跳过含敏感信息的消息
+        if CHAT_SANITIZE and content:
+            from ..quality import contains_sensitive as _chk
+            if _chk(content):
+                continue
         result = await conn.execute(
             """
             INSERT INTO chat_messages (session_id, role, content, meta, created_at)
             VALUES ($1, $2, $3, $4, $5)
             """,
-            sid, msg["role"], msg.get("content"),
+            sid, msg["role"], content,
             json.dumps(msg.get("meta", {}), ensure_ascii=False), msg["created_at"],
         )
         if result == "INSERT 0 1":

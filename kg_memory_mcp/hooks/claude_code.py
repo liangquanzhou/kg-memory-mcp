@@ -29,6 +29,7 @@ OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3")
 
 # Gemini 配置
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+CHAT_SANITIZE = os.environ.get("KG_CHAT_SANITIZE", "").lower() in ("1", "true", "yes")
 
 MIN_TURNS = 3
 
@@ -154,6 +155,12 @@ async def _archive_conversation(conn: asyncpg.Connection, messages: list, sessio
 
         if not content or not content.strip():
             continue
+
+        # KG_CHAT_SANITIZE=true 时跳过含敏感信息的消息
+        if CHAT_SANITIZE:
+            from ..quality import contains_sensitive as _chk
+            if _chk(content):
+                continue
 
         await conn.execute(
             """

@@ -206,6 +206,7 @@ kg-memory-mcp hooks status
 | `KG_DB_PORT` | `5432` | PostgreSQL port |
 | `KG_DB_PASSWORD` | *(none)* | PostgreSQL password (if required) |
 | `KG_DB_SSL` | *(disabled)* | Set to `require` to enable SSL for remote DB connections |
+| `KG_CHAT_SANITIZE` | *(disabled)* | Set to `true` to filter messages containing secrets before archival |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API base URL |
 | `OLLAMA_EMBED_MODEL` | `bge-m3` | Ollama embedding model name |
 

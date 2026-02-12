@@ -1,8 +1,12 @@
 """对话存档数据库操作层"""
 
 import json
+import os
 
 from .db import get_pool
+from .quality import contains_sensitive
+
+_CHAT_SANITIZE = os.getenv("KG_CHAT_SANITIZE", "").lower() in ("1", "true", "yes")
 
 
 async def upsert_session(
@@ -49,12 +53,16 @@ async def insert_messages(session_id: int, messages: list[dict]) -> int:
 
     count = 0
     for msg in new_messages:
+        content = msg.get("content") or ""
+        # KG_CHAT_SANITIZE=true 时过滤含敏感信息的消息
+        if _CHAT_SANITIZE and content and contains_sensitive(content):
+            continue
         await pool.execute(
             """
             INSERT INTO chat_messages (session_id, role, content, meta, created_at)
             VALUES ($1, $2, $3, $4, $5)
             """,
-            session_id, msg["role"], msg.get("content"),
+            session_id, msg["role"], content,
             json.dumps(msg.get("meta", {}), ensure_ascii=False), msg["created_at"],
         )
         count += 1

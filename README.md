@@ -208,6 +208,7 @@ kg-memory-mcp export sqlite --output ./backup.db
 | Claude Code | Yes | SessionEnd | `~/.claude/projects/**/*.jsonl` |
 | Codex CLI | Yes | notify (agent-turn-complete) | `~/.codex/sessions/**/*.jsonl` |
 | Gemini CLI | Yes | SessionEnd | `~/.gemini/tmp/*/chats/session-*.json` |
+| OpenCode | Yes | session.idle (plugin) | `~/.local/share/opencode/storage/` |
 
 ## Environment Variables
 

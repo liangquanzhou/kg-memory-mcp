@@ -141,7 +141,10 @@ async def _export_sqlite(output: str):
 # ============================================================
 
 @main.command()
-@click.option("--agent", type=click.Choice(["claude-code", "codex", "gemini-cli"]), help="Only collect from this agent")
+@click.option(
+    "--agent", type=click.Choice(["claude-code", "codex", "gemini-cli", "opencode"]),
+    help="Only collect from this agent",
+)
 def collect(agent: str | None):
     """Collect conversation transcripts from AI agents."""
     asyncio.run(_collect(agent))
@@ -149,7 +152,7 @@ def collect(agent: str | None):
 
 async def _collect(agent: str | None):
     from . import db
-    from .collector import claude_code, codex, gemini
+    from .collector import claude_code, codex, gemini, opencode
 
     os.makedirs(os.path.expanduser("~/.local/share/kg-memory/attachments"), exist_ok=True)
 
@@ -167,6 +170,11 @@ async def _collect(agent: str | None):
 
     if agent is None or agent == "gemini-cli":
         s, m = await gemini.collect()
+        total_s += s
+        total_m += m
+
+    if agent is None or agent == "opencode":
+        s, m = await opencode.collect()
         total_s += s
         total_m += m
 

@@ -38,14 +38,30 @@ def _setup_logging():
     )
 
 
+DB_SSL = os.environ.get("KG_DB_SSL", "")
+
+
 async def _get_conn() -> asyncpg.Connection:
     kwargs: dict = dict(database=DB_NAME, user=DB_USER, host=DB_HOST, port=int(DB_PORT), timeout=10)
     if DB_PASSWORD:
         kwargs["password"] = DB_PASSWORD
+    if DB_SSL and DB_SSL.lower() not in ("disable", "false", "0"):
+        kwargs["ssl"] = True
     return await asyncpg.connect(**kwargs)
 
 
+def _find_session_by_id(session_id: str) -> Path | None:
+    """按 session_id 精确匹配 Codex 会话文件，避免并发串档"""
+    if not session_id or not CODEX_SESSIONS_DIR.exists():
+        return None
+    for f in CODEX_SESSIONS_DIR.glob("**/*.jsonl"):
+        if session_id in f.name:
+            return f
+    return None
+
+
 def _find_latest_session() -> Path | None:
+    """Fallback：按修改时间找最新会话"""
     if not CODEX_SESSIONS_DIR.exists():
         return None
     sessions = list(CODEX_SESSIONS_DIR.glob("**/*.jsonl"))
@@ -224,7 +240,11 @@ async def run():
         if event_type != "agent-turn-complete":
             return
 
-        session_path = _find_latest_session()
+        # 优先按 session_id 精确匹配，避免并发串档
+        sid = payload.get("session_id", "")
+        session_path = _find_session_by_id(sid) if sid else None
+        if session_path is None:
+            session_path = _find_latest_session()
         if not session_path:
             log.info("No session file found")
             return

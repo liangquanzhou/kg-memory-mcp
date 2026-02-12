@@ -36,6 +36,9 @@ async def get_pool() -> asyncpg.Pool:
         password = os.getenv("KG_DB_PASSWORD")
         if password:
             kwargs["password"] = password
+        ssl_mode = os.getenv("KG_DB_SSL", "")
+        if ssl_mode and ssl_mode.lower() not in ("disable", "false", "0"):
+            kwargs["ssl"] = True
         _pool = await asyncpg.create_pool(**kwargs)
     return _pool
 

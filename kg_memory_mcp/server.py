@@ -116,8 +116,10 @@ async def get_session(
     Args:
         sessionId: Database session ID
         nativeSessionId: Agent's native session ID (e.g. ses_xxx for Claude Code)
-        agent: Agent name (recommended when using nativeSessionId to avoid ambiguity)
+        agent: Agent name (required when using nativeSessionId to avoid cross-agent ambiguity)
     """
+    if nativeSessionId and not agent:
+        return json.dumps({"error": "agent parameter is required when using nativeSessionId to avoid ambiguity"})
     result = await chat_db.get_session(session_id=sessionId, native_session_id=nativeSessionId, agent=agent)
     if result is None:
         return json.dumps({"error": "Session not found"})

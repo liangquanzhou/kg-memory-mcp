@@ -47,10 +47,15 @@ def _setup_logging():
 DB_PASSWORD = os.environ.get("KG_DB_PASSWORD", "")
 
 
+DB_SSL = os.environ.get("KG_DB_SSL", "")
+
+
 async def _get_conn() -> asyncpg.Connection:
     kwargs: dict = dict(database=DB_NAME, user=DB_USER, host=DB_HOST, port=int(DB_PORT), timeout=10)
     if DB_PASSWORD:
         kwargs["password"] = DB_PASSWORD
+    if DB_SSL and DB_SSL.lower() not in ("disable", "false", "0"):
+        kwargs["ssl"] = True
     return await asyncpg.connect(**kwargs)
 
 
@@ -69,7 +74,19 @@ def _get_embedding(text: str) -> list[float] | None:
         return None
 
 
+def _find_session_by_id(session_id: str) -> Path | None:
+    """按 sessionId 精确匹配 Gemini 会话文件，避免并发串档"""
+    if not session_id:
+        return None
+    for chats_dir in GEMINI_TMP_DIR.glob("*/chats"):
+        target = chats_dir / f"session-{session_id}.json"
+        if target.exists() and target.stat().st_size > 500:
+            return target
+    return None
+
+
 def _find_latest_session() -> Path | None:
+    """Fallback：按修改时间找最新会话"""
     sessions = []
     for chats_dir in GEMINI_TMP_DIR.glob("*/chats"):
         for json_file in chats_dir.glob("session-*.json"):
@@ -266,7 +283,11 @@ async def run():
 
         log.info(f"SessionEnd triggered: reason={reason}")
 
-        session_path = _find_latest_session()
+        # 优先按 session_id 精确匹配，避免并发串档
+        sid = hook_input.get("session_id", "")
+        session_path = _find_session_by_id(sid) if sid else None
+        if session_path is None:
+            session_path = _find_latest_session()
         if not session_path:
             log.info("No session file found")
             return
@@ -296,6 +317,13 @@ async def run():
             conversation = "\n\n".join(
                 f"[{m['role']}]: {m['content'][:2000]}"
                 for m in messages if m["content"] and len(m["content"]) > 50
+            )
+
+            # 脱敏：过滤含敏感信息的段落，防止发送到外部 API
+            from ..quality import contains_sensitive as _sens_check
+            conversation = "\n\n".join(
+                block for block in conversation.split("\n\n")
+                if not _sens_check(block)
             )
 
             project_hash = session_path.parent.parent.name[:8]

@@ -47,11 +47,16 @@ def _setup_logging():
 DB_PASSWORD = os.environ.get("KG_DB_PASSWORD", "")
 
 
+DB_SSL = os.environ.get("KG_DB_SSL", "")
+
+
 async def _get_conn() -> asyncpg.Connection:
     """获取短生命周期 DB 连接（hook 用，非连接池）"""
     kwargs: dict = dict(database=DB_NAME, user=DB_USER, host=DB_HOST, port=int(DB_PORT), timeout=10)
     if DB_PASSWORD:
         kwargs["password"] = DB_PASSWORD
+    if DB_SSL and DB_SSL.lower() not in ("disable", "false", "0"):
+        kwargs["ssl"] = True
     return await asyncpg.connect(**kwargs)
 
 
@@ -345,6 +350,14 @@ async def run():
                 return
 
             conversation = _format_conversation(messages)
+
+            # 脱敏：过滤含敏感信息的段落，防止发送到外部 API
+            from ..quality import contains_sensitive as _sens_check
+            conversation = "\n\n".join(
+                block for block in conversation.split("\n\n")
+                if not _sens_check(block)
+            )
+
             if len(conversation) < 200:
                 log.info("Conversation too short, skipping extraction")
                 return

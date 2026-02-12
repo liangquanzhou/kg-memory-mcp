@@ -146,6 +146,8 @@ async def get_session(
             agent, native_session_id,
         )
     elif native_session_id:
+        # agent 未指定时仍可查询，但可能跨 agent 歧义
+        # MCP 层已强制要求 agent，此处保留兼容内部调用
         session = await pool.fetchrow(
             "SELECT * FROM chat_sessions WHERE native_session_id = $1", native_session_id
         )

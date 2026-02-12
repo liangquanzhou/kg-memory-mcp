@@ -205,6 +205,7 @@ kg-memory-mcp hooks status
 | `KG_DB_HOST` | `localhost` | PostgreSQL host |
 | `KG_DB_PORT` | `5432` | PostgreSQL port |
 | `KG_DB_PASSWORD` | *(none)* | PostgreSQL password (if required) |
+| `KG_DB_SSL` | *(disabled)* | Set to `require` to enable SSL for remote DB connections |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API base URL |
 | `OLLAMA_EMBED_MODEL` | `bge-m3` | Ollama embedding model name |
 
@@ -214,7 +215,7 @@ kg-memory-mcp hooks status
 
 - **Database storage**: Conversation transcripts and knowledge graph data are stored in plaintext in your local PostgreSQL database. Ensure your database has appropriate access controls.
 - **Ollama embeddings**: Vector embeddings are generated locally via Ollama. No data leaves your machine for embedding generation.
-- **Gemini knowledge extraction** (opt-in): If you set the `GEMINI_API_KEY` environment variable, the SessionEnd hooks will send conversation summaries (up to 15KB) to Google's Gemini API for knowledge extraction. This is **disabled by default** -- without the API key, no data is sent externally. If you use this feature, be aware that conversation content (including project paths and code snippets) will be transmitted to Google.
+- **Gemini knowledge extraction** (opt-in): If you set the `GEMINI_API_KEY` environment variable, the SessionEnd hooks will send conversation summaries (up to 15KB) to Google's Gemini API for knowledge extraction. This is **disabled by default** -- without the API key, no data is sent externally. Conversation content is automatically filtered to remove lines containing API keys, passwords, and tokens before transmission, but project paths and code snippets may still be included.
 - **Hook transcript access**: Hooks only read transcript files from expected directories (`~/.claude/`, `~/.codex/`, `~/.gemini/`). Path traversal is validated.
 - **Sensitive content filtering**: The `quality.py` module filters out API keys, passwords, and tokens when writing to the knowledge graph via MCP tools and hooks. Note: bulk operations like `migrate` and `collect` also apply this filter.
 

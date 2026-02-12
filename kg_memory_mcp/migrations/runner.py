@@ -5,23 +5,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from ..psql import find_psql as _find_psql
+
 MIGRATIONS_DIR = Path(__file__).parent
-
-
-def _find_psql() -> str:
-    for p in [
-        "psql",
-        "/opt/homebrew/opt/postgresql@18/bin/psql",
-        "/opt/homebrew/opt/postgresql@17/bin/psql",
-        "/usr/local/bin/psql",
-    ]:
-        try:
-            subprocess.run([p, "--version"], capture_output=True, check=True)
-            return p
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            continue
-    print("Error: psql not found.", file=sys.stderr)
-    sys.exit(1)
 
 
 def _psql_run(psql: str, dsn: dict, sql: str) -> subprocess.CompletedProcess:
@@ -70,6 +56,13 @@ def run_migrations(dsn: dict) -> int:
     """
     psql = _find_psql()
 
+    # 0. Acquire advisory lock to prevent concurrent migrations
+    #    Lock ID 0x6B676D65 = ascii 'kgme' — unique to kg-memory-mcp
+    lock_result = _psql_run(psql, dsn, "SELECT pg_try_advisory_lock(x'6B676D65'::int);")
+    if "f" in lock_result.stdout.lower().split("\n")[2] if lock_result.returncode == 0 else True:
+        print("  Another migration is running, waiting...", file=sys.stderr)
+        _psql_run(psql, dsn, "SELECT pg_advisory_lock(x'6B676D65'::int);")
+
     # 1. Ensure schema_version table exists
     _psql_run(psql, dsn, """
         CREATE TABLE IF NOT EXISTS schema_version (
@@ -112,6 +105,8 @@ def run_migrations(dsn: dict) -> int:
             continue
 
         desc = filepath.stem.split("_", 1)[1] if "_" in filepath.stem else filepath.stem
+        # Sanitize: only allow alphanumeric, underscores, hyphens, spaces
+        desc = re.sub(r"[^a-zA-Z0-9_ -]", "", desc)
         print(f"  Applying {filepath.name} ...")
 
         result = _psql_file(psql, dsn, filepath)
@@ -119,9 +114,10 @@ def run_migrations(dsn: dict) -> int:
             print(f"  FAILED: {result.stderr.strip()}", file=sys.stderr)
             sys.exit(1)
 
-        # Record successful migration
+        # Record successful migration (escape single quotes for safety)
+        safe_desc = desc.replace("'", "''")
         _psql_run(psql, dsn,
-            f"INSERT INTO schema_version (version, description) VALUES ({version}, '{desc}');")
+            f"INSERT INTO schema_version (version, description) VALUES ({version}, '{safe_desc}');")
         current_version = version
         applied += 1
 
@@ -129,5 +125,8 @@ def run_migrations(dsn: dict) -> int:
         print(f"  Schema is up to date (v{current_version})")
     else:
         print(f"  Applied {applied} migration(s), now at v{current_version}")
+
+    # Release advisory lock
+    _psql_run(psql, dsn, "SELECT pg_advisory_unlock(x'6B676D65'::int);")
 
     return current_version

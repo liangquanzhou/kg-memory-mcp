@@ -37,19 +37,23 @@ async def upsert_session(
     return row["id"]
 
 
-async def insert_messages(session_id: int, messages: list[dict]) -> list[int]:
-    """批量插入消息，返回插入的 message_id 列表。通过已有消息数实现增量导入。"""
+async def insert_messages(session_id: int, messages: list[dict]) -> tuple[list[int], int]:
+    """批量插入消息，返回 (message_id 列表, 跳过的已有消息数)。通过已有消息数实现增量导入。
+
+    返回的 message_id 列表仅包含本次新插入的消息，与 messages[existing:] 一一对应。
+    被 sanitize 过滤的消息 id 为 -1。
+    """
     if not messages:
-        return []
+        return [], 0
     pool = await get_pool()
 
     # 增量导入：跳过已存在的消息
-    existing = await pool.fetchval(
+    existing: int = await pool.fetchval(
         "SELECT COUNT(*) FROM chat_messages WHERE session_id = $1", session_id
     )
     new_messages = messages[existing:]
     if not new_messages:
-        return []
+        return [], existing
 
     inserted_ids: list[int] = []
     for msg in new_messages:
@@ -78,7 +82,7 @@ async def insert_messages(session_id: int, messages: list[dict]) -> list[int]:
         """,
         session_id,
     )
-    return inserted_ids
+    return inserted_ids, existing
 
 
 async def insert_attachment(

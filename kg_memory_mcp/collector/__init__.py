@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import os
+import re
 from pathlib import Path
 
 from .. import chat_db
@@ -11,6 +12,9 @@ ATTACHMENT_DIR = os.getenv(
     "ATTACHMENT_DIR",
     os.path.expanduser("~/.local/share/kg-memory/attachments"),
 )
+
+# Max base64 payload size (50 MB encoded ≈ 37.5 MB decoded)
+_MAX_B64_SIZE = 50 * 1024 * 1024
 
 # media_type → file extension
 _EXT_MAP = {
@@ -26,12 +30,22 @@ def _save_attachment(session_id: str, media_type: str, data: str) -> tuple[str, 
     """Save base64 attachment to disk. Returns (file_path, file_size).
 
     Uses content hash for dedup — same image stored only once.
+    Raises ValueError for oversized payloads or invalid session IDs.
     """
+    # Guard: base64 size limit
+    if len(data) > _MAX_B64_SIZE:
+        raise ValueError(f"Attachment too large ({len(data)} bytes base64), skipping")
+
+    # Guard: sanitize session_id to prevent path traversal
+    safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", session_id)
+    if not safe_id:
+        raise ValueError(f"Invalid session_id for attachment path: {session_id!r}")
+
     raw = base64.b64decode(data)
-    content_hash = hashlib.sha256(raw).hexdigest()[:16]
+    content_hash = hashlib.sha256(raw).hexdigest()[:32]
     ext = _EXT_MAP.get(media_type, "bin")
 
-    dir_path = Path(ATTACHMENT_DIR) / session_id
+    dir_path = Path(ATTACHMENT_DIR) / safe_id
     dir_path.mkdir(parents=True, exist_ok=True)
 
     file_path = dir_path / f"{content_hash}.{ext}"
@@ -57,12 +71,13 @@ async def import_sessions(sessions: list[dict]) -> tuple[int, int]:
                 ended_at=session.get("ended_at"),
                 meta=session.get("meta"),
             )
-            message_ids = await chat_db.insert_messages(sid, session["messages"])
+            message_ids, existing = await chat_db.insert_messages(sid, session["messages"])
             total_sessions += 1
             total_messages += len([mid for mid in message_ids if mid > 0])
 
-            # Process attachments for newly inserted messages
-            for msg, msg_id in zip(session["messages"], message_ids):
+            # Process attachments — only for newly inserted messages (skip existing[:existing])
+            new_messages = session["messages"][existing:]
+            for msg, msg_id in zip(new_messages, message_ids):
                 if msg_id <= 0:
                     continue  # skipped or sanitized message
                 for att in msg.get("attachments", []):

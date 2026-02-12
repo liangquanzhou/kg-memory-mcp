@@ -49,17 +49,8 @@ def serve():
 
 def _find_psql() -> str:
     """Find psql binary, exit if not found."""
-    import subprocess
-
-    for p in ["psql", "/opt/homebrew/opt/postgresql@18/bin/psql",
-              "/opt/homebrew/opt/postgresql@17/bin/psql", "/usr/local/bin/psql"]:
-        try:
-            subprocess.run([p, "--version"], capture_output=True, check=True)
-            return p
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            continue
-    click.echo("Error: psql not found. Please install PostgreSQL.", err=True)
-    sys.exit(1)
+    from .psql import find_psql
+    return find_psql()
 
 
 def _psql_env(db_password: str) -> dict[str, str]:
@@ -119,11 +110,13 @@ def export_jsonl(output_dir: str):
 
 
 async def _export_jsonl(output_dir: str):
+    from . import db
     from .export import export_jsonl as do_export
     counts = await do_export(output_dir)
     click.echo(f"\nExported to {output_dir}/")
     for table, count in counts.items():
         click.echo(f"  {table}: {count}")
+    await db.close_pool()
 
 
 @export.command("sqlite")
@@ -134,11 +127,13 @@ def export_sqlite(output: str):
 
 
 async def _export_sqlite(output: str):
+    from . import db
     from .export import export_sqlite as do_export
     counts = await do_export(output)
     click.echo(f"\nExported to {output}")
     for table, count in counts.items():
         click.echo(f"  {table}: {count}")
+    await db.close_pool()
 
 
 # ============================================================

@@ -258,13 +258,21 @@ async def extract_and_save(
 # ── Rate limiting (for per-turn hooks) ──────────────────────
 
 def _should_extract(session_id: str, interval_sec: int) -> bool:
-    """Rate limit: only extract once per interval per session."""
+    """Rate limit: only extract once per interval per session (atomic)."""
     marker = Path(tempfile.gettempdir()) / f"kg-extract-{hashlib.md5(session_id.encode()).hexdigest()[:12]}"
-    if marker.exists():
+    try:
         age = time.time() - marker.stat().st_mtime
         if age < interval_sec:
             return False
-    marker.touch()
+    except FileNotFoundError:
+        pass  # first time — proceed to create
+    # Atomic create/update via exclusive open
+    try:
+        fd = os.open(str(marker), os.O_CREAT | os.O_WRONLY, 0o600)
+        os.close(fd)
+        os.utime(str(marker))  # refresh mtime
+    except OSError:
+        pass
     return True
 
 

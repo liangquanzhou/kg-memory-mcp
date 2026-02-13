@@ -3,6 +3,7 @@
 import json
 import os
 from datetime import datetime as _dt
+from datetime import timezone as _tz
 
 from .db import get_pool
 from .quality import contains_sensitive
@@ -39,12 +40,13 @@ async def upsert_session(
 
 
 def _ensure_dt(val) -> _dt | None:
-    """Normalize created_at to datetime (handles both str and datetime inputs)."""
+    """Normalize created_at to aware datetime (handles both str and datetime inputs)."""
     if isinstance(val, _dt):
-        return val
+        return val if val.tzinfo is not None else val.replace(tzinfo=_tz.utc)
     if isinstance(val, str):
         try:
-            return _dt.fromisoformat(val)
+            dt = _dt.fromisoformat(val)
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
         except (ValueError, TypeError):
             return None
     return None

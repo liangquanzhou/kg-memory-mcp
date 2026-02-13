@@ -282,11 +282,12 @@ async def read_graph(limit: int = 100, offset: int = 0) -> dict:
     entities = []
     entity_ids = []
     for row in entities_rows:
+        obs = row["observations"]
         entities.append({
             "name": row["name"],
             "entityType": row["entity_type"],
             "description": row["description"] or "",
-            "observations": json.loads(row["observations"]),
+            "observations": obs if isinstance(obs, list) else json.loads(obs),
         })
         entity_ids.append(row["id"])
 

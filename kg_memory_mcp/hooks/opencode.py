@@ -122,10 +122,8 @@ def _parse_session(session_path: Path) -> dict | None:
                 texts.append(part["text"])
             elif ptype == "tool-use":
                 name = part.get("name", "unknown")
-                tool_input = part.get("input", "")
-                if isinstance(tool_input, dict):
-                    tool_input = str(tool_input)[:300]
-                texts.append(f"[Tool: {name}({tool_input[:300]})]")
+                tool_input = str(part.get("input", ""))[:300]
+                texts.append(f"[Tool: {name}({tool_input})]")
             elif ptype == "tool-result":
                 result = part.get("result", "")
                 if isinstance(result, str) and result.strip():

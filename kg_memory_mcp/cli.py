@@ -269,7 +269,7 @@ def hooks_install(agent: str):
     elif agent == "gemini":
         _install_gemini_hook()
     elif agent == "opencode":
-        click.echo("OpenCode plugin: not yet implemented. Copy hooks/opencode.ts manually.")
+        _install_opencode_hook()
 
 
 @hooks.command("uninstall")
@@ -283,7 +283,7 @@ def hooks_uninstall(agent: str):
     elif agent == "gemini":
         _uninstall_gemini_hook()
     elif agent == "opencode":
-        click.echo("OpenCode plugin: manual removal required.")
+        _uninstall_opencode_hook()
 
 
 def _hook_command_exists(entries: list, keyword: str) -> bool:
@@ -504,8 +504,42 @@ def _uninstall_gemini_hook():
     click.echo(f"Uninstalled Gemini hook from {settings_path}")
 
 
+def _install_opencode_hook():
+    """Copy kg-memory.ts plugin to ~/.config/opencode/plugins/"""
+    plugin_dir = Path.home() / ".config" / "opencode" / "plugins"
+    plugin_file = plugin_dir / "kg-memory.ts"
+
+    if plugin_file.exists():
+        click.echo("OpenCode hook already installed.")
+        return
+
+    # Source: bundled .ts file next to this module
+    src = Path(__file__).parent / "hooks" / "opencode.ts"
+    if not src.exists():
+        click.echo(f"Error: plugin source not found at {src}", err=True)
+        return
+
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+
+    import shutil
+    shutil.copy2(src, plugin_file)
+    click.echo(f"Installed OpenCode plugin \u2192 {plugin_file}")
+
+
+def _uninstall_opencode_hook():
+    """Remove kg-memory.ts plugin from ~/.config/opencode/plugins/"""
+    plugin_file = Path.home() / ".config" / "opencode" / "plugins" / "kg-memory.ts"
+
+    if not plugin_file.exists():
+        click.echo("OpenCode hook not installed, nothing to uninstall.")
+        return
+
+    plugin_file.unlink()
+    click.echo(f"Uninstalled OpenCode plugin from {plugin_file}")
+
+
 @hooks.command("run")
-@click.argument("agent", type=click.Choice(["claude-code", "codex", "gemini"]))
+@click.argument("agent", type=click.Choice(["claude-code", "codex", "gemini", "opencode"]))
 def hooks_run(agent: str):
     """Run a hook directly (called by agent integrations)."""
     if agent == "claude-code":
@@ -514,6 +548,8 @@ def hooks_run(agent: str):
         from .hooks.codex import main as hook_main
     elif agent == "gemini":
         from .hooks.gemini import main as hook_main
+    elif agent == "opencode":
+        from .hooks.opencode import main as hook_main
     else:
         click.echo(f"Unknown agent: {agent}", err=True)
         sys.exit(1)
@@ -534,7 +570,8 @@ def hooks_status():
                     content = settings_path.read_text()
                     installed = "kg-memory-mcp" in content
                 elif agent == "opencode":
-                    installed = any(settings_path.iterdir()) if settings_path.is_dir() else False
+                    plugin_file = settings_path / "kg-memory.ts"
+                    installed = plugin_file.exists()
                 else:
                     with open(settings_path) as f:
                         data = json.load(f)

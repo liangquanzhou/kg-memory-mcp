@@ -38,6 +38,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["kg_memory_mcp"]
 
+[tool.hatch.build]
+artifacts = ["*.sql", "*.ts"]
+
 [tool.hatch.build.targets.sdist]
 exclude = [
     "CLAUDE.md",

@@ -43,12 +43,8 @@ def _setup_logging():
 
 
 async def _get_conn() -> asyncpg.Connection:
-    kwargs: dict = dict(database=DB_NAME, user=DB_USER, host=DB_HOST, port=int(DB_PORT), timeout=10)
-    if DB_PASSWORD:
-        kwargs["password"] = DB_PASSWORD
-    if DB_SSL and DB_SSL.lower() not in ("disable", "false", "0"):
-        kwargs["ssl"] = True
-    return await asyncpg.connect(**kwargs)
+    from ._common import get_conn
+    return await get_conn()
 
 
 def _ms_to_dt(ms: int | float) -> datetime:
@@ -124,6 +120,12 @@ def _parse_session(session_path: Path) -> dict | None:
             ptype = part.get("type", "")
             if ptype == "text" and part.get("text"):
                 texts.append(part["text"])
+            elif ptype == "tool-use":
+                name = part.get("name", "unknown")
+                tool_input = part.get("input", "")
+                if isinstance(tool_input, dict):
+                    tool_input = str(tool_input)[:300]
+                texts.append(f"[Tool: {name}({tool_input[:300]})]")
             elif ptype == "tool-result":
                 result = part.get("result", "")
                 if isinstance(result, str) and result.strip():
@@ -178,15 +180,28 @@ async def _archive_session(conn: asyncpg.Connection, session: dict) -> int:
     assert row is not None
     sid = row["id"]
 
-    existing: int = await conn.fetchval(
-        "SELECT COUNT(*) FROM chat_messages WHERE session_id = $1", sid
-    ) or 0
+    # 时间戳水位线 + 同时间戳去重（替代 COUNT offset）
+    last_ts = await conn.fetchval(
+        "SELECT MAX(created_at) FROM chat_messages WHERE session_id = $1", sid
+    )
+    if last_ts is not None:
+        at_ts = {
+            (r["role"], r["prefix"])
+            for r in await conn.fetch(
+                "SELECT role, LEFT(content, 200) AS prefix FROM chat_messages WHERE session_id = $1 AND created_at = $2",
+                sid, last_ts,
+            )
+        }
+        new_messages = [
+            m for m in session["messages"]
+            if m["created_at"] > last_ts
+            or (m["created_at"] == last_ts and (m["role"], (m.get("content") or "")[:200]) not in at_ts)
+        ]
+    else:
+        new_messages = session["messages"]
 
-    total = len(session["messages"])
-    if existing >= total:
+    if not new_messages:
         return 0
-
-    new_messages = session["messages"][existing:]
     count = 0
     for msg in new_messages:
         content = msg.get("content") or ""
@@ -245,6 +260,17 @@ async def run():
                 log.info(f"Archived {count} new messages for {session['native_session_id']}")
         finally:
             await conn.close()
+
+        # Knowledge extraction (rate-limited, per-turn hooks fire often)
+        from ._common import fork_extraction
+        fork_extraction(
+            session["messages"],
+            agent="opencode",
+            source_label=session.get("project_dir", session["native_session_id"]),
+            project_dir=session.get("project_dir"),
+            rate_limit_sec=300,
+            session_id=session["native_session_id"],
+        )
 
     except Exception as e:
         log.error(f"Hook error: {e}", exc_info=True)

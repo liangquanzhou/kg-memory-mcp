@@ -1,5 +1,6 @@
 """kg-memory-mcp: 知识图谱 + 对话存档 MCP Server"""
 
+import atexit
 import json
 
 from mcp.server.fastmcp import FastMCP
@@ -8,6 +9,17 @@ from . import chat_db, db
 from . import search as search_mod
 
 mcp = FastMCP("kg-memory", log_level="WARNING")
+
+
+# Graceful shutdown: close DB pool when process exits
+def _on_exit():
+    if db._pool is not None:
+        try:
+            db._pool.terminate()
+        except Exception:
+            pass
+
+atexit.register(_on_exit)
 
 
 # ============================================================
@@ -76,9 +88,16 @@ async def search_nodes(query: str, limit: int = 10) -> str:
 
 
 @mcp.tool()
-async def read_graph() -> str:
-    """Read the entire knowledge graph (all entities, observations, and relations)."""
-    graph = await db.read_graph()
+async def read_graph(limit: int = 100, offset: int = 0) -> str:
+    """Read the knowledge graph with pagination.
+
+    Args:
+        limit: Max entities per page (default 100, max 500)
+        offset: Entity offset for pagination
+    """
+    limit = min(max(limit, 1), 500)
+    offset = max(offset, 0)
+    graph = await db.read_graph(limit=limit, offset=offset)
     return json.dumps(graph, ensure_ascii=False)
 
 

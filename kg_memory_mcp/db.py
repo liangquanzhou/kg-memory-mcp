@@ -8,7 +8,7 @@ import os
 import asyncpg
 from pgvector.asyncpg import register_vector
 
-from .embedding import get_embedding
+from .embedding import get_embedding, get_embeddings
 from .quality import contains_sensitive, is_duplicate_hash, is_duplicate_semantic
 
 _pool: asyncpg.Pool | None = None
@@ -28,7 +28,7 @@ async def get_pool() -> asyncpg.Pool:
             host=os.getenv("KG_DB_HOST", "localhost"),
             port=int(os.getenv("KG_DB_PORT", "5432")),
             min_size=2,
-            max_size=5,
+            max_size=max(2, int(os.getenv("KG_DB_POOL_SIZE", "10"))),
             command_timeout=60,
             timeout=10,
             init=register_vector,
@@ -67,36 +67,44 @@ async def health_check() -> bool:
 async def create_entities(entities: list[dict]) -> list[dict]:
     """创建实体，返回创建结果列表"""
     pool = await get_pool()
+
+    # 批量生成 embedding（1 次 Ollama 调用代替 N 次）
+    embed_texts = [
+        f"{e['name']}: {e.get('description', '')}" if e.get("description") else e["name"]
+        for e in entities
+    ]
+    embeddings = await get_embeddings(embed_texts)
+
+    # 批量写入 entity（单连接 + 事务保证原子性）
     results = []
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for e, emb in zip(entities, embeddings):
+                name = e["name"]
+                entity_type = e["entityType"]
+                description = e.get("description", "")
+
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO kg_entities (name, entity_type, description, embedding)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (name) DO UPDATE SET
+                        entity_type = EXCLUDED.entity_type,
+                        description = EXCLUDED.description,
+                        embedding = EXCLUDED.embedding,
+                        updated_at = NOW()
+                    RETURNING id, name
+                    """,
+                    name, entity_type, description, emb,
+                )
+                results.append({"name": row["name"], "id": row["id"]})
+
+    # observations 在事务外处理（各自独立事务）
     for e in entities:
-        name = e["name"]
-        entity_type = e["entityType"]
-        description = e.get("description", "")
-
-        # 生成 embedding (基于 name + description)
-        embed_text = f"{name}: {description}" if description else name
-        emb = await get_embedding(embed_text)
-
-        row = await pool.fetchrow(
-            """
-            INSERT INTO kg_entities (name, entity_type, description, embedding)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (name) DO UPDATE SET
-                entity_type = EXCLUDED.entity_type,
-                description = EXCLUDED.description,
-                embedding = EXCLUDED.embedding,
-                updated_at = NOW()
-            RETURNING id, name
-            """,
-            name, entity_type, description, emb,
-        )
-
-        # 如果有初始 observations，直接添加
         observations = e.get("observations", [])
         if observations:
-            await add_observations(name, observations, source_agent=None)
+            await add_observations(e["name"], observations, source_agent=None)
 
-        results.append({"name": row["name"], "id": row["id"]})
     return results
 
 
@@ -129,33 +137,41 @@ async def add_observations(entity_name: str, observations: list[str], source_age
         raise ValueError(f"Entity '{entity_name}' not found")
 
     entity_id = entity["id"]
-    added = []
 
-    # 过滤敏感信息
+    # 1. 过滤敏感信息
     safe_observations = [o for o in observations if not contains_sensitive(o)]
+    if not safe_observations:
+        return []
 
+    # 2. Hash 去重（无需 embedding，快速过滤）
+    candidates = []
     for content in safe_observations:
-        # content_hash 去重
         content_hash = hashlib.sha256(content.encode()).hexdigest()
-        if await is_duplicate_hash(pool, entity_id, content_hash):
-            continue
+        if not await is_duplicate_hash(pool, entity_id, content_hash):
+            candidates.append(content)
+    if not candidates:
+        return []
 
-        # 生成 embedding
-        emb = await get_embedding(content)
+    # 3. 批量生成 embedding（1 次 Ollama 调用代替 N 次）
+    embeddings = await get_embeddings(candidates)
 
-        # 向量去重
-        if await is_duplicate_semantic(pool, entity_id, emb):
-            continue
+    # 4. 向量去重 + 写入（单连接 + 事务保证原子性）
+    added = []
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for content, emb in zip(candidates, embeddings):
+                if await is_duplicate_semantic(conn, entity_id, emb):
+                    continue
 
-        await pool.execute(
-            """
-            INSERT INTO kg_observations (entity_id, content, embedding, source_agent)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (entity_id, content_hash) DO NOTHING
-            """,
-            entity_id, content, emb, source_agent,
-        )
-        added.append(content)
+                await conn.execute(
+                    """
+                    INSERT INTO kg_observations (entity_id, content, embedding, source_agent)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (entity_id, content_hash) DO NOTHING
+                    """,
+                    entity_id, content, emb, source_agent,
+                )
+                added.append(content)
 
     return added
 
@@ -244,9 +260,11 @@ async def delete_relations(relations: list[dict]) -> list[dict]:
 # Read Graph
 # ============================================================
 
-async def read_graph() -> dict:
-    """读取完整图谱"""
+async def read_graph(limit: int = 100, offset: int = 0) -> dict:
+    """读取图谱（分页），返回当前页 entity + 相关 relation + 总数"""
     pool = await get_pool()
+
+    total: int = await pool.fetchval("SELECT COUNT(*) FROM kg_entities") or 0
 
     entities_rows = await pool.fetch(
         """
@@ -256,10 +274,13 @@ async def read_graph() -> dict:
         LEFT JOIN kg_observations o ON o.entity_id = e.id
         GROUP BY e.id
         ORDER BY e.name
-        """
+        LIMIT $1 OFFSET $2
+        """,
+        limit, offset,
     )
 
     entities = []
+    entity_ids = []
     for row in entities_rows:
         entities.append({
             "name": row["name"],
@@ -267,17 +288,36 @@ async def read_graph() -> dict:
             "description": row["description"] or "",
             "observations": json.loads(row["observations"]),
         })
+        entity_ids.append(row["id"])
 
-    relations_rows = await pool.fetch(
-        """
-        SELECT fe.name AS "from", te.name AS "to", r.relation_type AS "relationType"
-        FROM kg_relations r
-        JOIN kg_entities fe ON r.from_entity_id = fe.id
-        JOIN kg_entities te ON r.to_entity_id = te.id
-        ORDER BY r.id
-        """
-    )
+    entity_names = {e["name"] for e in entities}
 
-    relations = [dict(r) for r in relations_rows]
+    if entity_ids:
+        relations_rows = await pool.fetch(
+            """
+            SELECT fe.name AS "from", te.name AS "to", r.relation_type AS "relationType"
+            FROM kg_relations r
+            JOIN kg_entities fe ON r.from_entity_id = fe.id
+            JOIN kg_entities te ON r.to_entity_id = te.id
+            WHERE r.from_entity_id = ANY($1::int[]) OR r.to_entity_id = ANY($1::int[])
+            ORDER BY r.id
+            """,
+            entity_ids,
+        )
+        relations = []
+        for r in relations_rows:
+            rel = dict(r)
+            # Mark if either endpoint is outside the current page
+            if rel["from"] not in entity_names or rel["to"] not in entity_names:
+                rel["cross_page"] = True
+            relations.append(rel)
+    else:
+        relations = []
 
-    return {"entities": entities, "relations": relations}
+    return {
+        "entities": entities,
+        "relations": relations,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }

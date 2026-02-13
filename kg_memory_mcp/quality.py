@@ -2,7 +2,7 @@
 
 import re
 
-# 敏感词模式 — 匹配常见 API key / password / token 格式
+# 敏感词模式 — 匹配常见 API key / password / token / secret 格式
 _SENSITIVE_PATTERNS = [
     re.compile(r"(?i)\b(api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token)\s*[:=]\s*\S+"),
     re.compile(r"(?i)\bpassword\s*[:=]\s*\S+"),
@@ -10,6 +10,15 @@ _SENSITIVE_PATTERNS = [
     re.compile(r"(?i)\bAIza[A-Za-z0-9_-]{30,}"),  # Google API key
     re.compile(r"(?i)\bghp_[A-Za-z0-9]{30,}"),  # GitHub personal access token
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._-]{20,}"),
+    # AWS
+    re.compile(r"\bAKIA[A-Z0-9]{16}\b"),  # AWS Access Key ID
+    re.compile(r"(?i)\baws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*\S+"),
+    # SSH / PEM private key
+    re.compile(r"-----BEGIN\s+(RSA\s+|EC\s+|OPENSSH\s+)?PRIVATE\s+KEY-----"),
+    # Generic secret assignments
+    re.compile(r"(?i)\b(client[_-]?secret|app[_-]?secret|signing[_-]?key)\s*[:=]\s*\S{20,}"),
+    # GitHub fine-grained tokens + GitLab tokens
+    re.compile(r"(?i)\b(github_pat_|glpat-)[A-Za-z0-9_-]{20,}"),
 ]
 
 

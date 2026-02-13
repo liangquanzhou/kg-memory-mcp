@@ -2,6 +2,7 @@
 
 import json
 import os
+from datetime import datetime as _dt
 
 from .db import get_pool
 from .quality import contains_sensitive
@@ -37,23 +38,51 @@ async def upsert_session(
     return row["id"]
 
 
-async def insert_messages(session_id: int, messages: list[dict]) -> tuple[list[int], int]:
-    """批量插入消息，返回 (message_id 列表, 跳过的已有消息数)。通过已有消息数实现增量导入。
+def _ensure_dt(val) -> _dt | None:
+    """Normalize created_at to datetime (handles both str and datetime inputs)."""
+    if isinstance(val, _dt):
+        return val
+    if isinstance(val, str):
+        try:
+            return _dt.fromisoformat(val)
+        except (ValueError, TypeError):
+            return None
+    return None
 
-    返回的 message_id 列表仅包含本次新插入的消息，与 messages[existing:] 一一对应。
-    被 sanitize 过滤的消息 id 为 -1。
+
+async def insert_messages(session_id: int, messages: list[dict]) -> tuple[list[int], list[dict]]:
+    """批量插入消息，返回 (message_id 列表, 实际处理的 new_messages 列表)。
+
+    使用时间戳水位线实现增量导入（替代 COUNT offset，避免 sanitize 跳过消息后错位）。
+    message_ids 与 new_messages 一一对应。被 sanitize 过滤的消息 id 为 -1。
     """
     if not messages:
-        return [], 0
+        return [], []
     pool = await get_pool()
 
-    # 增量导入：跳过已存在的消息
-    existing: int = await pool.fetchval(
-        "SELECT COUNT(*) FROM chat_messages WHERE session_id = $1", session_id
+    # 时间戳水位线：只插入比最后一条消息更新的记录
+    last_ts = await pool.fetchval(
+        "SELECT MAX(created_at) FROM chat_messages WHERE session_id = $1", session_id
     )
-    new_messages = messages[existing:]
+    if last_ts is not None:
+        # >= 防止同时间戳消息丢失，再用 DB 内容去重
+        existing_at_ts = {
+            (row["role"], row["prefix"])
+            for row in await pool.fetch(
+                "SELECT role, LEFT(content, 200) AS prefix FROM chat_messages WHERE session_id = $1 AND created_at = $2",
+                session_id, last_ts,
+            )
+        }
+        new_messages = [
+            m for m in messages
+            if (dt := _ensure_dt(m.get("created_at"))) is not None
+            and (dt > last_ts or (dt == last_ts and (m["role"], (m.get("content") or "")[:200]) not in existing_at_ts))
+        ]
+    else:
+        new_messages = messages
+
     if not new_messages:
-        return [], existing
+        return [], []
 
     inserted_ids: list[int] = []
     for msg in new_messages:
@@ -82,7 +111,7 @@ async def insert_messages(session_id: int, messages: list[dict]) -> tuple[list[i
         """,
         session_id,
     )
-    return inserted_ids, existing
+    return inserted_ids, new_messages
 
 
 async def insert_attachment(

@@ -71,12 +71,11 @@ async def import_sessions(sessions: list[dict]) -> tuple[int, int]:
                 ended_at=session.get("ended_at"),
                 meta=session.get("meta"),
             )
-            message_ids, existing = await chat_db.insert_messages(sid, session["messages"])
+            message_ids, new_messages = await chat_db.insert_messages(sid, session["messages"])
             total_sessions += 1
             total_messages += len([mid for mid in message_ids if mid > 0])
 
-            # Process attachments — only for newly inserted messages (skip existing[:existing])
-            new_messages = session["messages"][existing:]
+            # Process attachments — message_ids and new_messages are aligned 1:1
             for msg, msg_id in zip(new_messages, message_ids):
                 if msg_id <= 0:
                     continue  # skipped or sanitized message

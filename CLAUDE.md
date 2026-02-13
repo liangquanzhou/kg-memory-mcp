@@ -7,13 +7,19 @@ PostgreSQL 知识图谱 + 对话存档 MCP Server，替代 mcp-server-memory (JS
 - Ollama bge-m3 embedding (1024 维)
 - FastMCP (Python)，asyncpg 驱动
 
-## 运行
-```bash
-# 开发
-uv run kg-memory-mcp serve
+## 安装与运行
 
-# 安装后
+当前使用 **安装模式**（`uv tool install`），各 CLI 工具的 MCP 配置指向 `~/.local/bin/kg-memory-mcp`。
+
+```bash
+# 首次安装 / 改代码后重装（必须！否则新代码不生效）
+uv tool install --force --from /Users/didi/Documents/project/2026/kg-memory-mcp kg-memory-mcp
+
+# 启动（MCP 配置自动调用，一般不需要手动跑）
 kg-memory-mcp serve
+
+# 开发调试（直接用项目 venv，改代码立即生效，不需要重装）
+uv run kg-memory-mcp serve
 ```
 
 ## 数据库

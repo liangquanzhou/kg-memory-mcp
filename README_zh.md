@@ -11,11 +11,11 @@
 - **知识图谱** — 创建带类型观察和有向关系的实体。自动去重（哈希 + 语义）和敏感内容过滤。
 - **对话存档** — 采集并存储 Claude Code、Codex CLI、Gemini CLI、OpenCode 的对话记录。完整会话历史及元数据。
 - **混合搜索** — 全文搜索（PostgreSQL tsvector）+ 向量相似度（pgvector HNSW），通过 RRF（Reciprocal Rank Fusion）融合，并支持 1-hop 图扩展。
-- **Hook 系统** — 会话结束后自动存档和知识提取。一条命令即可为支持的 Agent 安装 Hook。
+- **Hook 系统** — 会话结束后自动存档和知识提取（需 3 轮以上对话）。可选通过 Gemini API 进行结构化知识提取。一条命令即可为支持的 Agent 安装 Hook。
 - **本地 Embedding** — 使用 Ollama + bge-m3（1024 维）生成所有向量。数据不离开本机。
 - **Schema 迁移** — 轻量级编号 SQL 迁移系统。安全升级现有数据库，不丢失数据。
 - **数据导出** — 导出为 JSONL（人类可读、可互操作）或 SQLite（单文件备份）。兼容迁移到其他工具。
-- **图片存档** — 从 Agent 对话记录中提取 base64 图片到本地文件系统，并记录元数据。
+- **图片存档** — 从 Agent 对话记录中提取 base64 图片到本地文件系统，SHA256 去重，并记录元数据。单张最大 50 MB。
 
 ## 架构
 
@@ -156,7 +156,7 @@ kg-memory-mcp [OPTIONS] COMMAND [ARGS]
 命令:
   serve                  启动 MCP 服务器（stdio 传输）
   init                   运行 schema 迁移（创建/升级表）
-  migrate JSONL_PATH     从 memory.jsonl 迁移（mcp-server-memory 格式）
+  migrate JSONL_PATH     从 memory.jsonl 迁移（mcp-server-memory 格式，自动拆分大实体）
   collect                采集 AI Agent 对话记录
     --agent TEXT          仅采集: claude-code, codex, gemini-cli, opencode
   export jsonl           导出所有数据为 JSONL 文件
@@ -227,6 +227,7 @@ kg-memory-mcp export sqlite --output ./backup.db
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API 地址 |
 | `OLLAMA_EMBED_MODEL` | `bge-m3` | Ollama embedding 模型名 |
 | `ATTACHMENT_DIR` | `~/.local/share/kg-memory/attachments` | 图片附件存储目录 |
+| `GEMINI_API_KEY` | *（无）* | 启用 Hook 中的自动知识提取（可选，会向 Google 发送数据） |
 
 ## 隐私与安全
 

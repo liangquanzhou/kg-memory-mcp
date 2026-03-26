@@ -24,7 +24,7 @@ async def get_pool() -> asyncpg.Pool:
             return _pool
         kwargs: dict = dict(
             database=os.getenv("KG_DB_NAME", "knowledge_base"),
-            user=os.getenv("KG_DB_USER", "postgres"),
+            user=os.getenv("KG_DB_USER", "didi"),
             host=os.getenv("KG_DB_HOST", "localhost"),
             port=int(os.getenv("KG_DB_PORT", "5432")),
             min_size=2,

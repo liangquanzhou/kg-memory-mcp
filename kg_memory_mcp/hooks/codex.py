@@ -14,15 +14,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import asyncpg
-
 log = logging.getLogger("kg-memory-hook-codex")
 
-DB_NAME = os.environ.get("KG_DB_NAME", "knowledge_base")
-DB_USER = os.environ.get("KG_DB_USER", "postgres")
-DB_HOST = os.environ.get("KG_DB_HOST", "localhost")
-DB_PORT = os.environ.get("KG_DB_PORT", "5432")
-DB_PASSWORD = os.environ.get("KG_DB_PASSWORD", "")
 CHAT_SANITIZE = os.environ.get("KG_CHAT_SANITIZE", "").lower() in ("1", "true", "yes")
 
 CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
@@ -39,10 +32,7 @@ def _setup_logging():
     )
 
 
-DB_SSL = os.environ.get("KG_DB_SSL", "")
-
-
-async def _get_conn() -> asyncpg.Connection:
+async def _get_conn():
     from ._common import get_conn
     return await get_conn()
 
@@ -188,7 +178,9 @@ async def _archive_session(conn: asyncpg.Connection, session: dict) -> int:
         session.get("started_at"), session.get("ended_at"),
         json.dumps(session.get("meta", {}), ensure_ascii=False),
     )
-    assert row is not None
+    if row is None:
+        log.error(f"Failed to upsert session {session['native_session_id']}")
+        return 0
     sid = row["id"]
 
     # 时间戳水位线 + 同时间戳去重（替代 COUNT offset）

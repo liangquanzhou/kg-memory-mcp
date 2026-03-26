@@ -102,7 +102,9 @@ async def _archive_phase(messages: list[dict], session_id: str):
             """,
             "gemini-cli", session_id, started_at, ended_at, json.dumps({}),
         )
-        assert row is not None
+        if row is None:
+            log.error(f"Failed to upsert session {session_id}")
+            return
         db_session_id = row["id"]
 
         existing = await conn.fetchval(

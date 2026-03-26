@@ -67,7 +67,7 @@ def _psql_env(db_password: str) -> dict[str, str]:
 
 @main.command()
 @click.option("--db-name", envvar="KG_DB_NAME", default="knowledge_base", help="Database name")
-@click.option("--db-user", envvar="KG_DB_USER", default="postgres", help="Database user")
+@click.option("--db-user", envvar="KG_DB_USER", default="didi", help="Database user")
 @click.option("--db-host", envvar="KG_DB_HOST", default="localhost", help="Database host")
 @click.option("--db-port", envvar="KG_DB_PORT", default="5432", help="Database port")
 @click.option("--db-password", envvar="KG_DB_PASSWORD", default="", help="Database password")
@@ -194,7 +194,7 @@ async def _collect(agent: str | None):
 
 @main.command()
 @click.option("--db-name", envvar="KG_DB_NAME", default="knowledge_base", help="Database name")
-@click.option("--db-user", envvar="KG_DB_USER", default="postgres", help="Database user")
+@click.option("--db-user", envvar="KG_DB_USER", default="didi", help="Database user")
 @click.option("--db-host", envvar="KG_DB_HOST", default="localhost", help="Database host")
 @click.option("--db-port", envvar="KG_DB_PORT", default="5432", help="Database port")
 @click.option("--db-password", envvar="KG_DB_PASSWORD", default="", help="Database password")

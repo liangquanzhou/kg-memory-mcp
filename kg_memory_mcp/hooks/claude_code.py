@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 log = logging.getLogger("kg-memory-hook-claude")
@@ -93,8 +94,8 @@ async def _archive_phase(messages: list[dict], session_id: str, cwd: str):
     conn = await get_conn()
     try:
         timestamps = [m["created_at"] for m in messages]
-        started_at = timestamps[0] if timestamps else None
-        ended_at = timestamps[-1] if timestamps else None
+        started_at = datetime.fromisoformat(timestamps[0]) if timestamps else None
+        ended_at = datetime.fromisoformat(timestamps[-1]) if timestamps else None
 
         row = await conn.fetchrow(
             """
@@ -106,7 +107,9 @@ async def _archive_phase(messages: list[dict], session_id: str, cwd: str):
             """,
             "claude-code", session_id, cwd, started_at, ended_at, json.dumps({}),
         )
-        assert row is not None
+        if row is None:
+            log.error(f"Failed to upsert session {session_id}")
+            return
         db_session_id = row["id"]
 
         existing = await conn.fetchval(
@@ -125,7 +128,7 @@ async def _archive_phase(messages: list[dict], session_id: str, cwd: str):
                     continue
             await conn.execute(
                 "INSERT INTO chat_messages (session_id, role, content, meta, created_at) VALUES ($1, $2, $3, $4, $5)",
-                db_session_id, m["role"], content, json.dumps(m.get("meta", {})), m["created_at"],
+                db_session_id, m["role"], content, json.dumps(m.get("meta", {})), datetime.fromisoformat(m["created_at"]),
             )
             count += 1
 

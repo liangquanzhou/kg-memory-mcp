@@ -18,13 +18,15 @@ from pathlib import Path
 
 import asyncpg
 import httpx
+import numpy as np
+from pgvector.asyncpg import register_vector
 
 log = logging.getLogger("kg-memory-hook")
 
 # ── Config ──────────────────────────────────────────────────
 
 DB_NAME = os.environ.get("KG_DB_NAME", "knowledge_base")
-DB_USER = os.environ.get("KG_DB_USER", "postgres")
+DB_USER = os.environ.get("KG_DB_USER", "didi")
 DB_HOST = os.environ.get("KG_DB_HOST", "localhost")
 DB_PORT = os.environ.get("KG_DB_PORT", "5432")
 DB_PASSWORD = os.environ.get("KG_DB_PASSWORD", "")
@@ -46,7 +48,9 @@ async def get_conn() -> asyncpg.Connection:
         kwargs["password"] = DB_PASSWORD
     if DB_SSL and DB_SSL.lower() not in ("disable", "false", "0"):
         kwargs["ssl"] = True
-    return await asyncpg.connect(**kwargs)
+    conn = await asyncpg.connect(**kwargs)
+    await register_vector(conn)
+    return conn
 
 
 # ── Embedding ───────────────────────────────────────────────
@@ -182,7 +186,7 @@ async def save_to_kg(
         description = f"Auto-extracted from {agent} sessions"
 
     emb = get_embedding(entity_name)
-    emb_str = str(emb) if emb else None
+    emb_vec = np.array(emb, dtype=np.float32) if emb else None
 
     row = await conn.fetchrow(
         """
@@ -191,9 +195,11 @@ async def save_to_kg(
         ON CONFLICT (name) DO UPDATE SET updated_at = NOW()
         RETURNING id
         """,
-        entity_name, entity_type, description, emb_str,
+        entity_name, entity_type, description, emb_vec,
     )
-    assert row is not None
+    if row is None:
+        log.error(f"Failed to upsert entity '{entity_name}'")
+        return
     entity_id = row["id"]
 
     # Filter sensitive + dedup
@@ -219,13 +225,13 @@ async def save_to_kg(
 
     saved = 0
     for content, obs_emb in zip(safe_memories, embeddings):
-        obs_emb_str = str(obs_emb) if obs_emb else None
+        obs_emb_vec = np.array(obs_emb, dtype=np.float32) if obs_emb else None
         await conn.execute(
             """
             INSERT INTO kg_observations (entity_id, content, embedding, source_agent)
             VALUES ($1, $2, $3, $4)
             """,
-            entity_id, content, obs_emb_str, agent,
+            entity_id, content, obs_emb_vec, agent,
         )
         saved += 1
 

@@ -13,16 +13,8 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-import asyncpg
-
 log = logging.getLogger("kg-memory-hook-opencode")
 
-DB_NAME = os.environ.get("KG_DB_NAME", "knowledge_base")
-DB_USER = os.environ.get("KG_DB_USER", "postgres")
-DB_HOST = os.environ.get("KG_DB_HOST", "localhost")
-DB_PORT = os.environ.get("KG_DB_PORT", "5432")
-DB_PASSWORD = os.environ.get("KG_DB_PASSWORD", "")
-DB_SSL = os.environ.get("KG_DB_SSL", "")
 CHAT_SANITIZE = os.environ.get("KG_CHAT_SANITIZE", "").lower() in ("1", "true", "yes")
 
 STORAGE_DIR = Path(os.environ.get(
@@ -175,7 +167,9 @@ async def _archive_session(conn: asyncpg.Connection, session: dict) -> int:
         session.get("started_at"), session.get("ended_at"),
         json.dumps(session.get("meta", {}), ensure_ascii=False),
     )
-    assert row is not None
+    if row is None:
+        log.error(f"Failed to upsert session {session['native_session_id']}")
+        return 0
     sid = row["id"]
 
     # 时间戳水位线 + 同时间戳去重（替代 COUNT offset）

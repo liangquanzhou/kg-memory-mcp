@@ -60,7 +60,15 @@ def _parse_session(path: Path) -> tuple[list[dict], str]:
         session_id = session.get("sessionId", path.stem)
         for msg in session.get("messages", []):
             msg_type = msg.get("type", "unknown")
-            content = msg.get("content", "")
+            content_raw = msg.get("content", "")
+            # Normalize: Gemini may use parts format [{text: "..."}]
+            if isinstance(content_raw, list):
+                content = "\n".join(
+                    p.get("text", "") if isinstance(p, dict) else str(p)
+                    for p in content_raw
+                ).strip()
+            else:
+                content = str(content_raw)
             ts = msg.get("timestamp", datetime.now().isoformat())
             if msg_type in ("user", "gemini") and content:
                 messages.append({
@@ -81,8 +89,8 @@ async def _archive_phase(messages: list[dict], session_id: str):
     conn = await get_conn()
     try:
         timestamps = [m["created_at"] for m in messages if m.get("created_at")]
-        started_at = timestamps[0] if timestamps else None
-        ended_at = timestamps[-1] if timestamps else None
+        started_at = datetime.fromisoformat(timestamps[0].replace("Z", "+00:00")) if timestamps else None
+        ended_at = datetime.fromisoformat(timestamps[-1].replace("Z", "+00:00")) if timestamps else None
 
         row = await conn.fetchrow(
             """
@@ -112,7 +120,7 @@ async def _archive_phase(messages: list[dict], session_id: str):
                     continue
             await conn.execute(
                 "INSERT INTO chat_messages (session_id, role, content, meta, created_at) VALUES ($1, $2, $3, $4, $5)",
-                db_session_id, m["role"], content, json.dumps(m.get("meta", {})), m["created_at"],
+                db_session_id, m["role"], content, json.dumps(m.get("meta", {})), datetime.fromisoformat(m["created_at"].replace("Z", "+00:00")),
             )
 
         await conn.execute(
@@ -126,6 +134,30 @@ async def _archive_phase(messages: list[dict], session_id: str):
 
 # ── Entry point ─────────────────────────────────────────────
 
+def _dedup_check(session_id: str, window_sec: int = 5) -> bool:
+    """Return True if this session was already processed within window_sec."""
+    lock_dir = Path.home() / ".claude" / "hooks" / ".dedup"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = lock_dir / f"gemini-{session_id[:16]}.lock"
+    now = datetime.now().timestamp()
+    if lock_file.exists():
+        try:
+            prev = float(lock_file.read_text().strip())
+            if now - prev < window_sec:
+                return True
+        except (ValueError, OSError):
+            pass
+    lock_file.write_text(str(now))
+    # Cleanup stale lock files older than 1 hour
+    try:
+        for f in lock_dir.iterdir():
+            if f.suffix == ".lock" and (now - f.stat().st_mtime) > 3600:
+                f.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return False
+
+
 def main():
     _setup_logging()
 
@@ -135,6 +167,10 @@ def main():
         return
 
     reason = hook_input.get("reason", "unknown")
+    sid_raw = hook_input.get("session_id", "unknown")
+    if _dedup_check(sid_raw):
+        log.info(f"SessionEnd deduplicated: reason={reason}, session={sid_raw[:12]}...")
+        return
     log.info(f"SessionEnd triggered: reason={reason}")
 
     sid = hook_input.get("session_id", "")

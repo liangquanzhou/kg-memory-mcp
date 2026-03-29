@@ -13,7 +13,7 @@ PostgreSQL 知识图谱 + 对话存档 MCP Server，替代 mcp-server-memory (JS
 
 ```bash
 # 首次安装 / 改代码后重装（必须！否则新代码不生效）
-uv tool install --force --from /Users/didi/Documents/project/2026/kg-memory-mcp kg-memory-mcp
+uv tool install --force --from . kg-memory-mcp
 
 # 启动（MCP 配置自动调用，一般不需要手动跑）
 kg-memory-mcp serve

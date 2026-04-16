@@ -36,6 +36,9 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+OPENAI_EXTRACT_MODEL = os.environ.get("KG_EXTRACT_OPENAI_MODEL", "gpt-5.4-mini")
 
 MIN_MESSAGES = 3
 
@@ -108,16 +111,8 @@ def build_conversation(messages: list[dict], max_content_len: int = 2000) -> str
 
 # ── LLM extraction ─────────────────────────────────────────
 
-def extract_with_llm(conversation: str, source: str) -> list[str]:
-    """Use Gemini Flash to extract key knowledge from conversation."""
-    if not GEMINI_API_KEY or len(conversation) < 200:
-        return []
-
-    try:
-        from google import genai  # type: ignore[attr-defined]
-        client = genai.Client(api_key=GEMINI_API_KEY)
-
-        prompt = f"""分析以下 AI 编程助手的对话记录，提取值得长期记住的信息。
+def _build_extraction_prompt(conversation: str, source: str) -> str:
+    return f"""分析以下 AI 编程助手的对话记录，提取值得长期记住的信息。
 
 来源: {source}
 
@@ -135,29 +130,81 @@ def extract_with_llm(conversation: str, source: str) -> list[str]:
 
 只返回 JSON，不要其他内容。"""
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
-        text = response.text.strip()
 
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
+def _extract_memories_from_text(text: str) -> list[str]:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
 
-        extracted = json.loads(text)
+    extracted = json.loads(text)
 
-        memories = []
-        for key in ["user_preferences", "project_decisions", "solutions", "learned_facts"]:
-            items = extracted.get(key, [])
-            if items:
-                memories.extend(items)
+    memories = []
+    for key in ["user_preferences", "project_decisions", "solutions", "learned_facts"]:
+        items = extracted.get(key, [])
+        if items:
+            memories.extend(items)
+    return memories
 
-        return memories
-    except Exception as e:
-        log.warning(f"LLM extraction error: {e}")
+
+def _extract_with_gemini(prompt: str) -> list[str]:
+    from google import genai  # type: ignore[attr-defined]
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+    )
+    return _extract_memories_from_text(response.text or "")
+
+
+def _extract_with_openai(prompt: str) -> list[str]:
+    url = f"{OPENAI_BASE_URL}/responses"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": OPENAI_EXTRACT_MODEL,
+        "input": prompt,
+        "max_output_tokens": 2000,
+    }
+
+    resp = httpx.post(url, headers=headers, json=payload, timeout=60.0)
+    resp.raise_for_status()
+    data = resp.json()
+    text = data.get("output_text")
+    if not text:
+        parts = []
+        for item in data.get("output", []):
+            for content in item.get("content", []):
+                if content.get("type") in ("output_text", "text"):
+                    parts.append(content.get("text", ""))
+        text = "\n".join(parts)
+    return _extract_memories_from_text(text or "")
+
+
+def extract_with_llm(conversation: str, source: str) -> list[str]:
+    """Extract key knowledge with Gemini first, then OpenAI as fallback."""
+    if len(conversation) < 200:
         return []
+
+    prompt = _build_extraction_prompt(conversation, source)
+
+    if GEMINI_API_KEY:
+        try:
+            return _extract_with_gemini(prompt)
+        except Exception as e:
+            log.warning(f"Gemini extraction error: {e}")
+
+    if OPENAI_API_KEY:
+        try:
+            return _extract_with_openai(prompt)
+        except Exception as e:
+            log.warning(f"OpenAI extraction error: {e}")
+
+    return []
 
 
 # ── KG save ─────────────────────────────────────────────────

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Codex CLI notify hook: 自动存档对话到 PostgreSQL
+"""Codex CLI hook: 自动存档对话到 PostgreSQL
 
-触发事件: agent-turn-complete (每轮 AI 响应结束时)
-数据传递: JSON via sys.argv[1]
-配置: ~/.codex/config.toml → notify = ["kg-memory-mcp", "hooks", "run", "codex", ...]
+支持两种入口:
+- legacy notify: JSON via sys.argv[1], event type agent-turn-complete
+- official hooks: JSON via stdin, event hook_event_name Stop
 """
 
 import asyncio
@@ -60,6 +60,49 @@ def _find_latest_session() -> Path | None:
     if not sessions:
         return None
     return max(sessions, key=lambda p: p.stat().st_mtime)
+
+
+def _read_payload() -> dict | None:
+    """Read Codex payload from legacy notify argv or official hooks stdin."""
+    raw = None
+    for arg in sys.argv[1:]:
+        if arg.strip().startswith("{"):
+            raw = arg
+            break
+
+    if raw is None and not sys.stdin.isatty():
+        raw = sys.stdin.read()
+
+    if not raw:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+    if not raw.startswith("{"):
+        log.info("Ignoring non-JSON hook payload")
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        log.warning(f"Ignoring invalid hook payload: {e}")
+        return None
+
+
+def _find_session_for_payload(payload: dict) -> Path | None:
+    """Resolve transcript path from official hook payload, with legacy fallbacks."""
+    transcript_path = payload.get("transcript_path")
+    if transcript_path:
+        path = Path(transcript_path).expanduser()
+        if path.exists():
+            return path
+
+    sid = payload.get("session_id", "")
+    session_path = _find_session_by_id(sid) if sid else None
+    if session_path is None:
+        if sid:
+            log.warning(f"Session file not found for id={sid[:12]}..., falling back to latest")
+        session_path = _find_latest_session()
+    return session_path
 
 
 def _parse_session(filepath: Path) -> dict | None:
@@ -242,24 +285,18 @@ async def run():
     _setup_logging()
 
     try:
-        if len(sys.argv) < 2:
+        payload = _read_payload()
+        if payload is None:
             log.info("No payload provided")
             return
 
-        payload = json.loads(sys.argv[1])
-        event_type = payload.get("type", "")
+        event_type = payload.get("type") or payload.get("hook_event_name", "")
         cwd = payload.get("cwd", "")
 
-        if event_type != "agent-turn-complete":
+        if event_type not in ("agent-turn-complete", "Stop"):
             return
 
-        # 优先按 session_id 精确匹配，避免并发串档
-        sid = payload.get("session_id", "")
-        session_path = _find_session_by_id(sid) if sid else None
-        if session_path is None:
-            if sid:
-                log.warning(f"Session file not found for id={sid[:12]}..., falling back to latest")
-            session_path = _find_latest_session()
+        session_path = _find_session_for_payload(payload)
         if not session_path:
             log.info("No session file found")
             return

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -259,13 +260,19 @@ HOOK_AGENTS = {
 
 
 @hooks.command("install")
+@click.option(
+    "--codex-mode",
+    type=click.Choice(["notify", "official", "both"]),
+    default="notify",
+    help="Codex integration mode. notify keeps the stable legacy path; official writes hooks.json.",
+)
 @click.argument("agent", type=click.Choice(list(HOOK_AGENTS.keys())))
-def hooks_install(agent: str):
+def hooks_install(agent: str, codex_mode: str):
     """Install hook for a specific agent."""
     if agent == "claude-code":
         _install_claude_code_hook()
     elif agent == "codex":
-        _install_codex_hook()
+        _install_codex_hook(codex_mode)
     elif agent == "gemini":
         _install_gemini_hook()
     elif agent == "opencode":
@@ -332,24 +339,91 @@ def _install_claude_code_hook():
     click.echo(f"Installed Claude Code hook → {settings_path}")
 
 
-def _install_codex_hook():
-    """Install Codex notify hook into ~/.codex/config.toml"""
+def _set_codex_feature_flag(config_path: Path, feature: str, enabled: bool = True) -> None:
     import re as _re
 
-    config_path = Path.home() / ".codex" / "config.toml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    content = config_path.read_text() if config_path.exists() else ""
+    value = "true" if enabled else "false"
+    feature_line = f"{feature} = {value}"
+
+    if _re.search(rf'^\s*{_re.escape(feature)}\s*=', content, _re.MULTILINE):
+        content = _re.sub(
+            rf'^\s*{_re.escape(feature)}\s*=.*$',
+            feature_line,
+            content,
+            flags=_re.MULTILINE,
+        )
+    elif _re.search(r'^\[features\]\s*$', content, _re.MULTILINE):
+        content = _re.sub(
+            r'^\[features\]\s*$',
+            f"[features]\n{feature_line}",
+            content,
+            count=1,
+            flags=_re.MULTILINE,
+        )
+    else:
+        if content and not content.endswith("\n"):
+            content += "\n"
+        content += f"\n[features]\n{feature_line}\n"
+
+    fd, tmp_path = tempfile.mkstemp(dir=config_path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.replace(tmp_path, config_path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
+
+
+def _install_codex_official_hook(config_path: Path) -> bool:
+    """Install Codex official Stop hook into ~/.codex/hooks.json."""
+    hooks_path = config_path.parent / "hooks.json"
+    hooks_path.parent.mkdir(parents=True, exist_ok=True)
+
+    data = {}
+    if hooks_path.exists():
+        with open(hooks_path) as f:
+            data = json.load(f)
+
+    hooks_config = data.setdefault("hooks", {})
+    stop_hooks = hooks_config.setdefault("Stop", [])
+    if _hook_command_exists(stop_hooks, "kg-memory-mcp"):
+        click.echo("Codex official hook already installed.")
+        return False
+
+    stop_hooks.append({
+        "hooks": [
+            {
+                "type": "command",
+                "command": "kg-memory-mcp hooks run codex",
+                "statusMessage": "Archiving Codex conversation",
+                "timeout": 30,
+            }
+        ]
+    })
+    _atomic_write_json(hooks_path, data)
+    _set_codex_feature_flag(config_path, "codex_hooks", True)
+    click.echo(f"Installed Codex official hook → {hooks_path}")
+    return True
+
+
+def _install_codex_notify_hook(config_path: Path) -> bool:
+    """Install Codex notify hook into ~/.codex/config.toml."""
+    import re as _re
 
     content = config_path.read_text() if config_path.exists() else ""
-    if "kg-memory-mcp" in content:
+    notify_hook_re = r'^notify\s*=\s*\[.*["\']kg-memory-mcp["\'].*["\']hooks["\'].*["\']run["\'].*["\']codex["\'].*\]\s*$'
+    if _re.search(notify_hook_re, content, _re.MULTILINE):
         click.echo("Codex hook already installed.")
-        return
+        return False
 
     notify_line = 'notify = ["kg-memory-mcp", "hooks", "run", "codex"]'
 
     # 如果已有 notify = [...] 行，追加到数组中而不是新建一行
     if _re.search(r'^notify\s*=\s*\[', content, _re.MULTILINE):
         click.echo("Warning: existing notify config found. Please manually add kg-memory-mcp.", err=True)
-        return
+        return False
 
     # 确保末尾有换行再追加
     if content and not content.endswith("\n"):
@@ -367,6 +441,18 @@ def _install_codex_hook():
         raise
 
     click.echo(f"Installed Codex hook → {config_path}")
+    return True
+
+
+def _install_codex_hook(mode: str = "notify"):
+    """Install Codex memory hook."""
+    config_path = Path.home() / ".codex" / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if mode in ("notify", "both"):
+        _install_codex_notify_hook(config_path)
+    if mode in ("official", "both"):
+        _install_codex_official_hook(config_path)
 
 
 def _install_gemini_hook():
@@ -446,14 +532,14 @@ def _uninstall_codex_hook():
         return
 
     content = config_path.read_text()
-    if "kg-memory-mcp" not in content:
+    if not _re.search(r'^notify\s*=\s*\[.*["\']kg-memory-mcp["\'].*["\']hooks["\'].*["\']run["\'].*["\']codex["\'].*\]\s*$', content, _re.MULTILINE):
         click.echo("Codex hook not installed, nothing to uninstall.")
         return
 
-    # 精确匹配我们安装的那一行，避免误删用户其他 notify 配置
-    exact_pattern = r'^notify\s*=\s*\["kg-memory-mcp",\s*"hooks",\s*"run",\s*"codex"\]\s*\n?'
+    # 精确匹配我们安装的 notify 行，兼容 TOML 单引号/双引号。
+    exact_pattern = r'^notify\s*=\s*\[\s*["\']kg-memory-mcp["\']\s*,\s*["\']hooks["\']\s*,\s*["\']run["\']\s*,\s*["\']codex["\']\s*\]\s*\n?'
     if _re.search(exact_pattern, content, _re.MULTILINE):
-        filtered = _re.sub(exact_pattern, '', content, flags=_re.MULTILINE)
+        filtered = _re.sub(exact_pattern, "", content, flags=_re.MULTILINE)
     else:
         # notify 行含 kg-memory-mcp 但格式不匹配（用户手动编辑过），提示手动处理
         click.echo("Warning: notify config contains kg-memory-mcp but in unexpected format.", err=True)
@@ -568,7 +654,23 @@ def hooks_status():
             try:
                 if agent == "codex":
                     content = settings_path.read_text()
-                    installed = "kg-memory-mcp" in content
+                    notify_installed = bool(
+                        re.search(
+                            r'^notify\s*=\s*\[.*["\']kg-memory-mcp["\'].*["\']hooks["\'].*["\']run["\'].*["\']codex["\'].*\]\s*$',
+                            content,
+                            re.MULTILINE,
+                        )
+                    )
+                    hooks_path = settings_path.parent / "hooks.json"
+                    official_installed = False
+                    if hooks_path.exists():
+                        with open(hooks_path) as f:
+                            hooks_data = json.load(f).get("hooks", {})
+                        official_installed = any(
+                            _hook_command_exists(event_hooks, "kg-memory-mcp")
+                            for event_hooks in hooks_data.values()
+                        )
+                    installed = notify_installed or official_installed
                 elif agent == "opencode":
                     plugin_file = settings_path / "kg-memory.ts"
                     installed = plugin_file.exists()

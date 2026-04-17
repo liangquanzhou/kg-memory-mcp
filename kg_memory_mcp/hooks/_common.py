@@ -40,6 +40,10 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 OPENAI_EXTRACT_MODEL = os.environ.get("KG_EXTRACT_OPENAI_MODEL", "gpt-5.4-mini")
 
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
+DEEPSEEK_EXTRACT_MODEL = os.environ.get("KG_EXTRACT_DEEPSEEK_MODEL", "deepseek-chat")
+
 MIN_MESSAGES = 3
 
 
@@ -185,12 +189,39 @@ def _extract_with_openai(prompt: str) -> list[str]:
     return _extract_memories_from_text(text or "")
 
 
+def _extract_with_deepseek(prompt: str) -> list[str]:
+    """DeepSeek uses OpenAI-compatible /chat/completions endpoint."""
+    url = f"{DEEPSEEK_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": DEEPSEEK_EXTRACT_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 2000,
+        "response_format": {"type": "json_object"},
+    }
+
+    resp = httpx.post(url, headers=headers, json=payload, timeout=60.0, trust_env=False)
+    resp.raise_for_status()
+    data = resp.json()
+    text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    return _extract_memories_from_text(text or "")
+
+
 def extract_with_llm(conversation: str, source: str) -> list[str]:
-    """Extract key knowledge with Gemini first, then OpenAI as fallback."""
+    """Extract key knowledge: DeepSeek → Gemini → OpenAI (first configured wins, with fallback on error)."""
     if len(conversation) < 200:
         return []
 
     prompt = _build_extraction_prompt(conversation, source)
+
+    if DEEPSEEK_API_KEY:
+        try:
+            return _extract_with_deepseek(prompt)
+        except Exception as e:
+            log.warning(f"DeepSeek extraction error: {e}")
 
     if GEMINI_API_KEY:
         try:

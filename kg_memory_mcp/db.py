@@ -177,7 +177,7 @@ async def add_observations(entity_name: str, observations: list[str], source_age
 
 
 async def delete_observations(entity_name: str, observations: list[str]) -> list[str]:
-    """删除指定 observations"""
+    """按 content 精确匹配删除。LLM 易漂移（改标点/截断/改措辞），优先用 delete_observations_by_id。"""
     pool = await get_pool()
     entity = await pool.fetchrow(
         "SELECT id FROM kg_entities WHERE name = $1", entity_name
@@ -194,6 +194,50 @@ async def delete_observations(entity_name: str, observations: list[str]) -> list
         if result == "DELETE 1":
             deleted.append(content)
     return deleted
+
+
+async def delete_observations_by_id(ids: list[int]) -> dict:
+    """按 observation id 批量删除。返回 {deleted: [id...], not_found: [id...]}。"""
+    if not ids:
+        return {"deleted": [], "not_found": []}
+    pool = await get_pool()
+    deleted_rows = await pool.fetch(
+        "DELETE FROM kg_observations WHERE id = ANY($1::int[]) RETURNING id",
+        ids,
+    )
+    deleted = [row["id"] for row in deleted_rows]
+    not_found = [i for i in ids if i not in deleted]
+    return {"deleted": deleted, "not_found": not_found}
+
+
+async def get_entity_observations(entity_name: str) -> dict:
+    """返回实体所有观察，带 id + created_at，供 LLM 基于 id 操作。"""
+    pool = await get_pool()
+    entity = await pool.fetchrow(
+        "SELECT id, name, entity_type FROM kg_entities WHERE name = $1", entity_name
+    )
+    if entity is None:
+        raise ValueError(f"Entity '{entity_name}' not found")
+
+    rows = await pool.fetch(
+        """
+        SELECT id, content, created_at
+        FROM kg_observations
+        WHERE entity_id = $1
+        ORDER BY id
+        """,
+        entity["id"],
+    )
+    observations = [
+        {"id": row["id"], "content": row["content"], "created_at": row["created_at"].isoformat()}
+        for row in rows
+    ]
+    return {
+        "name": entity["name"],
+        "entityType": entity["entity_type"],
+        "observations": observations,
+        "count": len(observations),
+    }
 
 
 # ============================================================

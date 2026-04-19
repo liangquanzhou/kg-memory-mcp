@@ -63,9 +63,29 @@ async def delete_entities(names: list[str]) -> str:
 
 @mcp.tool()
 async def delete_observations(entityName: str, observations: list[str]) -> str:
-    """Delete specific observations from an entity."""
+    """Delete observations by exact content match. Use delete_observations_by_id when possible
+    (content matching is fragile because LLMs often rewrite text slightly)."""
     deleted = await db.delete_observations(entityName, observations)
     return json.dumps({"deleted": deleted}, ensure_ascii=False)
+
+
+@mcp.tool()
+async def delete_observations_by_id(ids: list[int]) -> str:
+    """Delete observations by their numeric ids. Preferred over content-based deletion.
+
+    Returns {deleted: [...], not_found: [...]}."""
+    result = await db.delete_observations_by_id(ids)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+async def get_entity_observations(entityName: str) -> str:
+    """Get all observations for an entity including their numeric ids.
+
+    Useful before calling delete_observations_by_id — the LLM can see stable ids
+    instead of trying to re-emit long content strings."""
+    result = await db.get_entity_observations(entityName)
+    return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()

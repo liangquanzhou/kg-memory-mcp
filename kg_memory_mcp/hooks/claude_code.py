@@ -164,6 +164,15 @@ def main():
     log.info(f"SessionEnd triggered: session={session_id[:12]}..., reason={reason}")
 
     if not transcript_path or not Path(transcript_path).exists():
+        # Fallback: Claude Code sometimes fires SessionEnd without transcript_path.
+        # Locate jsonl by convention: ~/.claude/projects/<slashes-to-dashes(cwd)>/<session_id>.jsonl
+        if session_id and session_id != "unknown" and cwd:
+            candidate = Path.home() / ".claude" / "projects" / cwd.replace("/", "-") / f"{session_id}.jsonl"
+            if candidate.exists():
+                log.info(f"transcript_path missing; fallback to {candidate}")
+                transcript_path = str(candidate)
+
+    if not transcript_path or not Path(transcript_path).exists():
         log.info("No transcript file, skipping")
         return
 

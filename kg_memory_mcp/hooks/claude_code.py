@@ -53,7 +53,12 @@ def _normalize_messages(messages: list) -> list[dict]:
             continue
 
         msg_type = m.get("type", "")
-        content = m.get("content", "")
+        # v2 schema: user/assistant content nested under "message"; fallback to v1 flat
+        nested = m.get("message")
+        if isinstance(nested, dict) and "content" in nested:
+            content = nested["content"]
+        else:
+            content = m.get("content", "")
 
         if msg_type == "user":
             role = "user"

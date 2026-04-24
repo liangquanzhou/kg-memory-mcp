@@ -42,7 +42,7 @@ OPENAI_EXTRACT_MODEL = os.environ.get("KG_EXTRACT_OPENAI_MODEL", "gpt-5.4-mini")
 
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
-DEEPSEEK_EXTRACT_MODEL = os.environ.get("KG_EXTRACT_DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_EXTRACT_MODEL = os.environ.get("KG_EXTRACT_DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 MIN_MESSAGES = 3
 
@@ -201,6 +201,9 @@ def _extract_with_deepseek(prompt: str) -> list[str]:
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 2000,
         "response_format": {"type": "json_object"},
+        # v4 defaults to thinking mode (output goes to reasoning_content, leaving content empty).
+        # Disable for extraction so the JSON object is in `content` where we read it.
+        "thinking": {"type": "disabled"},
     }
 
     resp = httpx.post(url, headers=headers, json=payload, timeout=60.0, trust_env=False)

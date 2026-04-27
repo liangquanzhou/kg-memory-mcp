@@ -40,8 +40,27 @@ def main():
 @main.command()
 def serve():
     """Start the MCP server (stdio transport)."""
+    _start_orphan_watchdog()
     from .server import mcp
     mcp.run()
+
+
+def _start_orphan_watchdog(check_interval: float = 2.0) -> None:
+    """父进程死后退出。macOS 没有 PR_SET_PDEATHSIG，只能轮询 PPID。"""
+    import os
+    import threading
+    import time
+
+    if os.getppid() == 1:
+        return
+
+    def _watch() -> None:
+        while True:
+            time.sleep(check_interval)
+            if os.getppid() == 1:
+                os._exit(0)
+
+    threading.Thread(target=_watch, daemon=True, name="orphan-watchdog").start()
 
 
 # ============================================================

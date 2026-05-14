@@ -35,14 +35,31 @@ DB_SSL = os.environ.get("KG_DB_SSL", "")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3")
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-OPENAI_EXTRACT_MODEL = os.environ.get("KG_EXTRACT_OPENAI_MODEL", "gpt-5.4-mini")
-
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
 DEEPSEEK_EXTRACT_MODEL = os.environ.get("KG_EXTRACT_DEEPSEEK_MODEL", "deepseek-v4-flash")
+
+VOLCENGINE_BASE_URL = os.environ.get("VOLCENGINE_BASE_URL", "https://ark.cn-beijing.volces.com/api/coding").rstrip("/")
+VOLCENGINE_EXTRACT_MODEL = os.environ.get("KG_EXTRACT_VOLCENGINE_MODEL", "kimi-k2.6")
+
+
+def _read_volcengine_token() -> str:
+    token = os.environ.get("ARK_CODING_AUTH_TOKEN") or os.environ.get("VOLCENGINE_AUTH_TOKEN")
+    if token:
+        return token
+    try:
+        result = subprocess.run(
+            ["pass", "show", "volcengine/coding/auth-token"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().splitlines()[0]
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
+VOLCENGINE_AUTH_TOKEN = _read_volcengine_token()
 
 MIN_MESSAGES = 3
 
@@ -152,41 +169,31 @@ def _extract_memories_from_text(text: str) -> list[str]:
     return memories
 
 
-def _extract_with_gemini(prompt: str) -> list[str]:
-    from google import genai  # type: ignore[attr-defined]
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-    )
-    return _extract_memories_from_text(response.text or "")
-
-
-def _extract_with_openai(prompt: str) -> list[str]:
-    url = f"{OPENAI_BASE_URL}/responses"
+def _extract_with_volcengine(prompt: str) -> list[str]:
+    """Volcengine ARK coding gateway (Anthropic-compatible /v1/messages) — billed against subscription quota, not PAYG."""
+    url = f"{VOLCENGINE_BASE_URL}/v1/messages"
     headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Authorization": f"Bearer {VOLCENGINE_AUTH_TOKEN}",
         "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
     }
     payload = {
-        "model": OPENAI_EXTRACT_MODEL,
-        "input": prompt,
-        "max_output_tokens": 2000,
+        "model": VOLCENGINE_EXTRACT_MODEL,
+        "max_tokens": 2000,
+        "messages": [{"role": "user", "content": prompt}],
+        # kimi-k2.6 defaults to thinking mode; disable so output lands in the text block instead of being consumed by reasoning.
+        "thinking": {"type": "disabled"},
     }
 
-    resp = httpx.post(url, headers=headers, json=payload, timeout=60.0)
+    resp = httpx.post(url, headers=headers, json=payload, timeout=60.0, trust_env=False)
     resp.raise_for_status()
     data = resp.json()
-    text = data.get("output_text")
-    if not text:
-        parts = []
-        for item in data.get("output", []):
-            for content in item.get("content", []):
-                if content.get("type") in ("output_text", "text"):
-                    parts.append(content.get("text", ""))
-        text = "\n".join(parts)
-    return _extract_memories_from_text(text or "")
+    text = "".join(
+        block.get("text", "")
+        for block in data.get("content", [])
+        if block.get("type") == "text"
+    )
+    return _extract_memories_from_text(text)
 
 
 def _extract_with_deepseek(prompt: str) -> list[str]:
@@ -214,29 +221,23 @@ def _extract_with_deepseek(prompt: str) -> list[str]:
 
 
 def extract_with_llm(conversation: str, source: str) -> list[str]:
-    """Extract key knowledge: DeepSeek → Gemini → OpenAI (first configured wins, with fallback on error)."""
+    """Extract key knowledge: Volcengine coding gateway (kimi-k2.6, subscription quota) → DeepSeek (first configured wins, with fallback on error)."""
     if len(conversation) < 200:
         return []
 
     prompt = _build_extraction_prompt(conversation, source)
+
+    if VOLCENGINE_AUTH_TOKEN:
+        try:
+            return _extract_with_volcengine(prompt)
+        except Exception as e:
+            log.warning(f"Volcengine extraction error: {e}")
 
     if DEEPSEEK_API_KEY:
         try:
             return _extract_with_deepseek(prompt)
         except Exception as e:
             log.warning(f"DeepSeek extraction error: {e}")
-
-    if GEMINI_API_KEY:
-        try:
-            return _extract_with_gemini(prompt)
-        except Exception as e:
-            log.warning(f"Gemini extraction error: {e}")
-
-    if OPENAI_API_KEY:
-        try:
-            return _extract_with_openai(prompt)
-        except Exception as e:
-            log.warning(f"OpenAI extraction error: {e}")
 
     return []
 

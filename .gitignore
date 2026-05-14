@@ -39,3 +39,7 @@ tmp/
 .vscode/
 *.swp
 *.swo
+
+# Ad-hoc maintenance scripts (kept locally, not part of package)
+/list_persons.py
+/process_compaction.py

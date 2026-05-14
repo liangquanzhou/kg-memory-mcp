@@ -13,7 +13,9 @@ PostgreSQL 知识图谱 + 对话存档 MCP Server，替代 mcp-server-memory (JS
 
 ```bash
 # 首次安装 / 改代码后重装（必须！否则新代码不生效）
-uv tool install --force --from . kg-memory-mcp
+# 注意：必须用 --reinstall 不能用 --force。--force 只重建 venv 元数据，不会让 uv
+# invalidate wheel cache（cache key 是 (name, version)），结果会复用旧 wheel，源码改动无效。
+uv tool install --reinstall --from . kg-memory-mcp
 
 # 启动（MCP 配置自动调用，一般不需要手动跑）
 kg-memory-mcp serve
